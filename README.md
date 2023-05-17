@@ -4,7 +4,7 @@
 2. [Highlights](#highlights)
 3. [Technologies](#technologies)
 4. [Included Files](#technologies)
-5. [Intallations](#installations)
+5. [Installations](#installations)
 6. [Methods](#methods)
 ## Summary
 ***
