@@ -1,0 +1,857 @@
+title: "Sequential Milestones Underlying the Development of Adult Neural Stem Cells in the Hippocampus"
+output: html_notebook
+---
+Dennisse Jimenez-Cyrus, Vijay S. Adusumilli, Max H. Stempel, Sandra Maday, Guo-li
+Ming, Hongjun Song and Allison M. Bond--2023
+
+#Setup Directory of Results
+```{r}
+setwd("F:/ResultsDirectory")
+dir.create(paste0(getwd(),"/Manuscript_",Sys.Date()))
+dir.create(paste0(getwd(),"/Manuscript_",Sys.Date(),"/results"))
+dir.create(paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","plots","_",Sys.Date()))
+dir.create(paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","Compiled_figures","_",Sys.Date()))
+dir.create(paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","DEG","_",Sys.Date()))
+
+MainDirectory<-getwd()
+ResultsDirectory<-paste0(getwd(),"/Manuscript_",Sys.Date(),"/results")
+PlotDirectory<-paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","plots","_",Sys.Date())
+PathsDirectory<-paste0(list.files(getwd(),full.names = T))
+FiguresDirectory<-paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","Compiled_figures","_",Sys.Date())
+DEGDirectory<-paste0(getwd(),"/Manuscript_",Sys.Date(),"/results/","GOResults","_",Sys.Date())
+
+```
+#Data Processing
+Importing of RSEM and Seurat clean up and removal of contaminated cells and lower level analysis of cells
+```{r}
+library(scuttle)
+library(scran)
+library(dplyr)
+library(Seurat)
+library(SingleCellExperiment)
+
+tpm<-as.data.frame(txi.rsem$counts)
+tpm<-t(tpm)
+keep_cols <- colSums(tpm > 0) > 5 #Remove genes <5TPM
+tpm <- tpm[,keep_cols]
+keep_cells <- rowSums(tpm) > 200 #Remove cells with low number of genes
+tpm <- tpm[keep_cells,]
+TPM<-as.matrix(t(tpm))
+dim(TPM)
+
+saveRDS(TPM,paste0(MainDirectory,"/","TPM.RDS"))
+
+Hopx_matrix <- CreateSeuratObject(TPM, min.cells = 0, project = "HopxGFP")#
+Hopx_matrix[["percent.mt"]] <- PercentageFeatureSet(Hopx_matrix, pattern = "^mt.")
+MitoPlot<-as.ggplot(VlnPlot(Hopx_matrix, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3))+theme(plot.title = element_text(size=12))
+Hopx_matrix@assays$RNA@data <- log(x = as.matrix(TPM) + 1)
+
+num<-grep('Foxj1', rownames(Hopx_matrix@assays$RNA@data)) # Specific to ependymal cells
+length(which(Hopx_matrix@assays$RNA@data[rownames(Hopx_matrix@assays$RNA@data)[num], ] != 0))# how many cells are positive?
+EpendymalCells<-names(which(Hopx_matrix@assays$RNA@data[rownames(Hopx_matrix@assays$RNA@data)[num], ] != 0))
+LowExpressingCells<-rownames(subset(Hopx_matrix@meta.data,Hopx_matrix@meta.data$nFeature_RNA < 500))#Find out the cells in quiescent state that have too low num of genes
+
+remove<-c(EpendymalCells,LowExpressingCells)
+keep.cells<-subset(colnames(Hopx_matrix),!colnames(Hopx_matrix) %in% remove)
+length(keep.cells)
+Hopx_matrix<-subset(Hopx_matrix, cells = keep.cells )
+
+#Confirm Removal of Inappropriate cells
+cilia_genes<-"Foxj1"
+counts = Hopx_matrix[['RNA']]@counts
+ncells = ncol(counts)
+(cilia_genes %in% row.names(counts))
+sum(counts[cilia_genes,]>0)/ncells*100
+
+counts<-Hopx_matrix@assays$RNA@counts #This is correct
+col<-colnames(Hopx_matrix@assays$RNA@counts)
+#Add age to metadata
+Hopx.s@meta.data$Age<-"0"
+Hopx.s@meta.data[grep("_P3_",rownames(Hopx.s@meta.data)),"Age"]<-"P3"
+Hopx.s@meta.data[grep("_P7_",rownames(Hopx.s@meta.data)),"Age"]<-"P7"
+Hopx.s@meta.data[grep("_P14_",rownames(Hopx.s@meta.data)),"Age"]<-"P14"
+metadata<-Hopx_matrix@meta.data[,c("Age","nFeature_RNA","RNAspecies","Size_Factor")]
+
+sce <- SingleCellExperiment(list(counts=counts[,col]),
+                            colData=DataFrame(metadata),
+                            rowData=DataFrame(length=rownames(Hopx.s)),
+                            metadata=metadata)
+sce
+metadata<-as.data.frame(colData(sce))
+metadata$Age<-as.factor(metadata$Age)
+metadata %>%
+  ggplot(aes(color= Age, x=label.Round1.Size_Factor, fill= Age)) +
+  geom_density(alpha = 0.2) +
+  scale_x_log10() +
+  theme_classic() +
+  ylab("Cell density") +
+  geom_vline(xintercept = 500)
+
+metadata %>%
+    ggplot(aes(color= Age, x=label.Round1.nFeature_RNA, fill= Age)) +
+  geom_density(alpha = 0.2) +
+  scale_x_log10() +
+  theme_classic() +
+  ylab("Cell density") +
+  geom_vline(xintercept = 500)
+
+metadata %>%
+    ggplot(aes(color= Age, x=label.Round1.Size_Factor, fill= Age)) +
+    geom_density(alpha = 0.2) +
+    scale_x_log10() +
+    theme_classic() +
+    ylab("Cell density") +
+    geom_vline(xintercept = 500)
+sce <- logNormCounts(sce)
+#Convert back to Seurat object for downstream processing
+Hopx.s <- SeuratObject::as.Seurat(sce, counts = counts,  data = as.matrix(logcounts(sce)))
+
+#Note that this single command replaces NormalizeData, ScaleData, and FindVariableFeatures
+Hopx.s <- SCTransform(Hopx.s)
+Hopx.s <- RunPCA(Hopx.s, verbose = FALSE)
+Hopx.s <- RunUMAP(Hopx.s, dims = 1:30, verbose = FALSE)
+Hopx.s <- FindNeighbors(Hopx.s, dims = 1:30, verbose = FALSE)
+Hopx.s <- FindClusters(Hopx.s, verbose = FALSE,resolution = 2) #default setting created 2 clusters segregated on astroglial expression and cell cycling
+
+PC1HM<-DimHeatmap(Hopx.s, reduction = "pca", dim = 1, nfeatures=20,fast = FALSE) +scale_fill_viridis()
+PC2HM<-DimHeatmap(Hopx.s, reduction = "pca", dim = 2, nfeatures=20,fast = FALSE) +scale_fill_viridis()
+
+#Identify which cells cell cycle phase per cell
+
+g2m.genes<-rownames(subset(cyclebaseGeneList,cyclebaseGeneList$Peaktime == "G2/M"))
+S.genes<-rownames(subset(cyclebaseGeneList,cyclebaseGeneList$Peaktime == "S"))
+
+library(biomaRt)#convert human to mouse genes
+g2m.genes<-convertMouseGeneList(g2m.genes) 
+S.genes<-convertMouseGeneList(S.genes) 
+
+Hopx.s <- CellCycleScoring(Hopx.s, s.features =S.genes, g2m.features = g2m.genes, set.ident = TRUE)#selection of genes in Seurat are randomly selected however overall Phase score remains the same
+
+pdf(paste0(PlotsDirectory,"/UMAP_Plots",Sys.Date(),".pdf"))
+UMAP_Phase<-DimPlot(Hopx.s, label = TRUE,group.by =  "Phase",pt.size = 3, label.size = 4,ncol = 2)+scale_color_manual(values=c("G1"="darkblue","G2M"="red4","S"="red"))# + NoLegend()
+UMAP_SCT_snn_res.2<-DimPlot(Hopx.s, label = TRUE,group.by =  "SCT_snn_res.2",pt.size = 3, label.size = 4,ncol = 2)
+UMAPPlot<-DimPlot(Hopx.s, reduction = "umap",pt.size = 3,label = TRUE, label.size = 4,ncol = 2) 
+PCAPlot<-DimPlot(Hopx.s, reduction = "pca",pt.size = 3,label = TRUE, label.size = 4,ncol = 2) 
+print(UMAP_Phase,UMAP_SCT_snn_res.2,UMAPPlot,PCAPlot)
+
+dev.off()
+saveRDS("Hopx.s","ResultsDirectory/Hopx.s.RDS")
+```
+
+#Clustering & Astrocyte classification 
+```{r}
+#Confirming number of clusters 
+#Identify and validate the minimum and maximum number of clusters 
+#Maximum Clusters is 7 & minimum is 2
+
+library(monocle)
+library(clustree)
+library(factoextra)
+library(NbClust)
+library(dplyr)
+
+#Selecting # of clusters 
+#WSS Elbow method
+res<-t(as.matrix(Hopx.s@assays$SCT@data)) #RNA
+wssplot(res, nc=10, seed=1234)
+saveRDS(res,"ResultsDirectory/ElbowWSSResults.RDS")
+
+#Dynamic Cluster Tree Method for validation of cluster maximum
+clustreeRes<-ClustreeDF(emb=Hopx.s@reductions$pca@cell.embeddings)
+saveRDS(clustreeRes,"ResultsDirectory/clustreeResults.RDS")
+ 
+#######
+#Monocle Clustering
+library(monocle)
+library(cowplot)
+phenodata <- as.data.frame(Hopx.s@meta.data)
+RNACounts<-as.matrix(Hopx.s@assays$RNA@counts)#for visualizations
+SCTdata<-as.matrix(Hopx.s@assays$SCT@data)#for Pseudotime reconstruction and cluster generation
+
+nrow(phenodata)
+
+pd <- new('AnnotatedDataFrame', data = as.data.frame(phenodata))
+fd <- new("AnnotatedDataFrame",data.frame(gene_short_name = rownames(SCTdata), row.names = rownames(SCTdata)))
+Hopx.m<- new('CellDataSet', exprs = as.matrix(SCTdata[,rownames(phenodata)]), phenoData = pd, featureData =fd,expressionFamily = uninormal())
+#Hopx.m<- estimateSizeFactors(Hopx.m)
+Hopx.m<-clusterCells(Hopx.m,num_clusters = 6,method='DDRTree',norm_method='none')#3
+Hopx.m<-reduceDimension(Hopx.m,max_components = 2,reduction_method = 'DDRTree',verbose = T,pseudo_expr = 0,norm_method = "none")
+Hopx.m<-orderCells(Hopx.m)
+Hopx.m<-orderCells(Hopx.m,reverse=F)
+
+pdf(paste0(ResultsDirectory,"/MonocleResults_Clustering",Sys.Date(),".pdf"))
+
+p2<-plot_cell_trajectory(Hopx.m, color_by = "Age",cell_size=4)+ scale_color_manual(values = NewAgeColors)+theme(text = element_text(size=11))
+p3<-plot_cell_trajectory(Hopx.m, color_by = "Pseudotime")
+p4<-plot_cell_trajectory(Hopx.m, color_by = "State")
+p5<-plot_cell_trajectory(Hopx.m, color_by = "Cluster")+scale_color_manual(values=NewFigureColors.Orig)
+p6<-plot_cell_trajectory(Hopx.m, color_by = "Pseudotime")
+plot_grid(p1,p4,p5,p6,ncol=4,nrow=1)
+
+dev.off()
+#######
+#Monocle: Astrocyte Classification
+
+Abhd3_id <-
+    row.names(subset(fData(Hopx.m), gene_short_name == "Abhd3"))
+Gjb6_id <-
+    row.names(subset(fData(Hopx.m), gene_short_name == "Gjb6"))
+Gabrg1_id <-
+    row.names(subset(fData(Hopx.m), gene_short_name == "Gabrg1"))
+
+cth <- newCellTypeHierarchy()
+cth <- addCellType(cth, "Astrocytes", classify_func = function(x) { x[Abhd3_id,] > 3 & x[Gjb6_id,] >= 1 & x[Gabrg1_id,]>=0 })
+
+Hopx.m<- classifyCells(Hopx.m, cth, 0.1)
+table(pData(Hopx.m)$CellType)
+
+#######
+#Check what is selected for as astrocytes
+AstrocyteCheck<-subset(pData(Hopx.m),pData(Hopx.m)$CellType =="Astrocytes") 
+QuiescentCheck<-subset(pData(Hopx.m),pData(Hopx.m)$Cluster == "2" | pData(Hopx.m)$Cluster == "6")
+table(AstrocyteCheck$CellType)#28 cells of original quiescent group are astrocytes
+
+AstrocyteCheck_qNSC<-subset(AstrocyteCheck,AstrocyteCheck$Cluster == c("MA","6")) 
+t2<-as.data.frame(table(AstrocyteCheck$Cluster))
+
+library(reshape)
+t1<-as.matrix(round(prop.table(table(pData(Hopx.m)$CellType,pData(Hopx.m)$Cluster))*100,1))
+o<-melt(t1)
+o$Var.1<- factor(o$Var.1,levels = c("Astrocytes", "Unknown"))
+o$Var.2<- (factor(o$Var.2,levels = c("1", "5", "3","2","6","4")))
+
+#######
+#Identify clusters
+pData(Hopx.m)$FinalCluster_ag<-"0"
+pData(Hopx.m)[pData(Hopx.m)$Cluster =="1","FinalCluster_ag"]<-"a1"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "2","FinalCluster_ag"]<-"q1"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "3","FinalCluster_ag"]<-"a3"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "4","FinalCluster_ag"]<-"ImA"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "5","FinalCluster_ag"]<-"a2"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "6","FinalCluster_ag"]<-"q2"
+pData(Hopx.m)[rownames(AstrocyteCheck),"FinalCluster_ag"]<-"MA"
+
+NewFigureColors<-c("a1"="#DC050C","q1"="deepskyblue2","a3"="gold1","ImA"="darkolivegreen2","a2"="sienna1","q2"="blue","MA"="mediumpurple")
+
+Barplot_Astrocytes<-ggplot(subset(o,o$Var.1 =="Astrocytes"), aes(fill=Var.2, y=value, x=Var.2)) + 
+ geom_bar(position="dodge", stat="identity")+scale_fill_manual(values=c("1"="gold","2"="deepskyblue","3"="gold1","4"="darkolivegreen2","5"="sienna1","6"="blue","7"="mediumpurple"))
+
+saveRDS(Hopx.m,"ResultsDirectory/Hopx.m.RDS")
+
+#######
+#Monocle cluster purity for UMAP coordinates
+library(bluster)
+
+
+Hopx.s@meta.data<-pData(Hopx.m)
+
+sce.counts<-as.SingleCellExperiment(Hopx.s, assay = "SCT")
+sil.approx <- approxSilhouette(reducedDim(sce.counts, "UMAP"), clusters=colData(sce.counts)$FinalCluster_ag)
+
+sil.data <- as.data.frame(sil.approx)
+sil.data$closest <- factor(ifelse(sil.data$width > 0, colData(sce.counts)$FinalCluster_ag, sil.data$other))
+sil.data$cluster <- factor(colData(sce.counts)$FinalCluster_ag)
+
+ggplot(sil.data, aes(x=cluster, y=width, colour=closest)) +
+    ggbeeswarm::geom_quasirandom(method="smiley")+scale_fill_manual(values=NewFigureColors)
+
+pure.sce <- neighborPurity(reducedDim(sce.counts, "UMAP"), clusters=colData(sce.counts)$FinalCluster_ag)
+
+pure.data <- as.data.frame(pure.sce)
+pure.data$maximum <- factor(pure.data$maximum)
+pure.data$cluster <- factor(colData(sce.counts)$FinalCluster_ag)
+
+ggplot(pure.data, aes(x=cluster, y=purity, colour=maximum)) +
+    ggbeeswarm::geom_quasirandom(method="smiley")
+
+#######
+#Correlation across ages and clusters
+library(Matrix.utils)
+library(corrplot)
+
+groups <- pData(Hopx.m)[, c("FinalCluster_ag", "Age")]
+
+pb <- aggregate.Matrix(as.data.frame(t(exprs(Hopx.m))), groupings = groups, fun = "sum")
+
+Correlation_Age_Clusters<-cor(as.matrix(t(pb)), method = "pearson")
+colmat <- colorRampPalette(c("blue", "blue", "red"))
+
+corrplot(Correlation_Age_Clusters, tl.col = "black", order = "hclust", hclust.method = "average", addrect = 4, tl.cex = 0.7, cl.lim=c(min(Correlation_Age_Clusters),max(Correlation_Age_Clusters)), is.corr=FALSE,col = colmat(200))
+ccm = melt(Correlation_Age_Clusters)
+
+pdf(paste0(PlotsDirectory,"/AgeCorrelation",Sys.Date(),".pdf"))
+AgeCorrPlot = ggplot(ccm, aes(x = X1, y=X2)) +
+  geom_tile(aes(fill = value), colour = "grey45") +
+  coord_equal() +
+  scale_fill_gradient(low = "black", high = "red") +
+  theme(axis.text.y = element_text(face = "bold", colour = "grey25"),
+        legend.title = element_text(size = 10, face = "bold"),legend.position = "bottom",
+        axis.text.x = element_text(angle = 90, face = "bold",colour = "grey25", vjust = 0.5, hjust = 0),
+        panel.background = element_blank(), panel.border = element_rect(fill = NA, colour = NA),
+        axis.ticks = element_blank()) +
+  labs(x= "", y = "", fill = "Pearson's Correlation") +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(limits = rev(levels(ccm$Var2)))
+print(AgeCorrPlot)
+dev.off()
+
+#######  
+#Confirm Cluster expression differences via Seurat
+
+library(viridis)
+library(ComplexHeatmap)
+
+Hopx.s.markers <- FindAllMarkers(object = Hopx.s, assay = "RNA", only.pos = TRUE, min.pct = 0.25, thresh.use = 0.5)
+Hopx.s.markers<-subset(Hopx.s.markers,Hopx.s.markers$p_val_adj<0.05)
+top10<-Hopx.s.markers %>% group_by(cluster) %>% top_n(20, avg_log2FC)  %>% unique()#Top50 genes
+
+pdf(paste0(getwd(),"/ClusterHeatmap_SeuratTopFC",Sys.Date(),".pdf"))
+
+mat<- Hopx.s[["RNA"]]@data[top10$gene, ] %>% as.matrix()
+mat<- t(scale(t(mat)))
+cluster_anno<- Hopx.s@meta.data$FinalCluster_ag
+quantile(mat, c(0.1, 0.95))
+col_fun = circlize::colorRamp2(c(-1,0,3),  viridis(3))
+
+Hopx.s@meta.data$FinalCluster_ag<- factor(Hopx.s@meta.data$FinalCluster_ag,levels = c("a1", "a2", "a3","q1","q2","ImA","MA"))
+
+Heatmap(mat, name = "Expression",  
+        column_split = factor(cluster_anno), 
+        cluster_columns = TRUE,column_order = rownames(Hopx.s@meta.data[order(Hopx.s@meta.data$FinalCluster_ag),]) ,
+        show_column_dend = FALSE,
+        cluster_column_slices = FALSE,
+        column_title_gp = gpar(fontsize = 4),
+        column_gap = unit(0.5, "mm"),
+        cluster_rows = FALSE,
+        show_row_dend = FALSE,
+        col = col_fun,
+        row_names_gp = gpar(fontsize = 4),
+        column_title_rot = 90,
+        top_annotation = HeatmapAnnotation(foo = anno_block(gp = gpar(fill = NewFigureColors))),
+        show_column_names = FALSE,
+        use_raster = FALSE,
+        raster_quality = 4,raster_resize_mat ="max",heatmap_width = unit(8, "cm"), heatmap_height = unit(8, "cm"))
+dev.off()
+saveRDS(Hopx.s.markers,"~/ResultsDirectory/Hopx.s.markers.RDS")
+```
+
+#Correlation of Astrocytes cells and Hochegemer et.al., 2018
+ (Figure 3)
+```{r}
+library(corrplot);
+library(ggcorrplot)
+library(reshape)
+
+#File location
+#https://www.dropbox.com/sh/60nyd1gc6wnp6xc/AACqMLw54IJsT48pRbh5t5sea/DentateAllAges.rds?dl=0
+
+DentateAllAges<-readRDS("D:/Users/Downloads/DentateAllAges.rds")
+clusters<-levels(DentateAllAges@meta.data$characteristicscellcluster)
+
+#Select Astro-adult,Astro-juv,Immature-Astro,RGL,RGL_young
+LA.raw.data <- as.matrix(GetAssayData(DentateAllAges, slot = "counts")[, WhichCells(DentateAllAges, ident = c( "Astro-adult","Astro-juv","Immature-Astro","RGL","RGL_young"))])
+
+CommonGenes.Linnarson<-rownames(LA.raw.data)[which(rownames(LA.raw.data) %in% rownames(Hopx.m))]
+#11526 genes
+#Our is normalized only find feature counts for 
+# split the dataset into a list of two seurat objects 
+
+DentateAllAges<- SCTransform(DentateAllAges)
+#Temp change cluster column name 
+
+Hopx.s<-readRDS("~/ResultsDirectory/THESIS/Trajectory/Hopx.s.RDS")
+colnames(Hopx.s@meta.data)[51]<-"characteristicscellcluster"
+colnames(Hopx.s@meta.data)[4]<-"characteristicsage"
+
+Split.list<-list(DentateAllAges,Hopx.s)
+
+# normalize and identify variable features for each dataset independently
+
+Split.list <- lapply(X = Split.list, FUN = function(x) {
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 3000)
+})
+
+options(future.globals.maxSize=2845835264 )#2714*1024^2
+
+features <- SelectIntegrationFeatures(object.list = Split.list )
+Split.list <- PrepSCTIntegration(object.list = Split.list, anchor.features = features, verbose = FALSE)
+Astro.anchors <- FindIntegrationAnchors(object.list = Split.list, anchor.features = features,normalization.method="SCT")
+
+# this command creates an 'integrated' data assay
+DG.combined <- IntegrateData(anchorset = Astro.anchors)
+
+DefaultAssay(DG.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+DG.combined <- ScaleData(DG.combined, verbose = FALSE)
+DG.combined <- RunPCA(DG.combined, npcs = 30, verbose = FALSE)
+DG.combined <- RunUMAP(DG.combined, reduction = "pca", dims = 1:30)
+DG.combined <- FindNeighbors(DG.combined, reduction = "pca", dims = 1:30)
+DG.combined <- FindClusters(DG.combined, resolution = 0.5)
+
+#Correlation among all clusters
+#groups <- DG.combined@meta.data[, c("characteristicscellcluster","characteristicsage")]
+groups <- DG.combined@meta.data[, c("characteristicscellcluster")]
+
+pb <- aggregate.Matrix(as.data.frame(t(DG.combined@assays$integrated@scale.data)), groupings = groups, fun = "sum")
+
+n1<-rownames(pb)[grep("Astro-adult",rownames(pb))]
+n2<-rownames(pb)[grep("Astro-juv",rownames(pb))]
+n3<-rownames(pb)[grep("Immature-Astro",rownames(pb))]
+n4<-rownames(pb)[grep("RGL",rownames(pb))]
+n5<-rownames(pb)[grep("RGL_young",rownames(pb))]
+n6<-rownames(pb)[grep("ImA",rownames(pb))]
+n7<-rownames(pb)[grep("q1",rownames(pb))]
+n8<-rownames(pb)[grep("MA",rownames(pb))]
+
+COI<-c( n1,n2,n3,n4,n5,n6,n7,n8)
+COI<-c(n6,n8,n1,n2,n3,n4,n5)
+Subpb<-pb[rownames(pb) %in% COI, colnames(pb) %in% DG.combined.markers$gene]
+
+
+colmat <- colorRampPalette(c("blue", "orange", "red"))
+colmat <- colorRampPalette(c("blue", "white", "red"))
+
+corr <- round(cor(as.matrix(t(Subpb))), 1)
+col1 = colorRampPalette(c('#7F0000', 'red', '#FF7F00', 'yellow', 'white',
+                           'cyan', '#007FFF', 'blue', '#00007F'))
+corrplot(corr, tl.col = "black", order = "hclust", hclust.method = "average", addrect = 4, tl.cex = 0.7, col.lim  =c(min(corr),max(corr)), is.corr=FALSE,col = colmat(200), method = 'color',diag = FALSE,type = 'lower')
+
+      #turn into a 3-column table
+      corr1 <- as.data.frame(as.table(corr))
+     #remove the NA values from above 
+     #corr1 <- na.omit(corr1) 
+      corr1 <- subset(corr1, Freq < 0.4) 
+     #sort by highest correlation
+      corr1 <- corr1[order(-abs(corr1$Freq)),] 
+     #turn corr back into matrix in order to plot with corrplot
+      mtx_corr <- (reshape2::dcast(corr1, Var1~Var2, value.var="Freq"))
+      mtx_corr[is.na(mtx_corr)] <- 0 
+      rownames(mtx_corr) <- mtx_corr$Var1
+      mtx_corr<-mtx_corr[,-1]
+
+  
+#plot correlations visually
+write.csv(as.matrix(mtx_corr),"PearsonCorr_Linnarson.csv") #remove manually
+corrplot(as.numeric(mtx_corr), tl.col = "black", order = "hclust", hclust.method = "average", addrect = 4, tl.cex = 0.7, col.lim  =c(min(corr1),max(corr1)), is.corr=FALSE,col = colmat(200), method = 'color',diag = FALSE,type = 'lower')
+
+pheatmap(mtx_corr,cluster_rows = T,cluster_cols=T,color=colmat(200),border_color = NA,na_col="red",height=4, width = 8,show_colnames=T)
+
+```
+
+#Regulon Expression of Static Clusters 
+```{r}
+library(SCENIC)
+library(doParallel)
+
+## mc9nr: Motif collection version 9: 24k motifs
+dbFiles <- c("https://resources.aertslab.org/cistarget/databases/mus_musculus/mm10/refseq_r80/mc9nr/gene_based/mm10__refseq-r80__500bp_up_and_100bp_down_tss.mc9nr.feather",
+             "https://resources.aertslab.org/cistarget/databases/mus_musculus/mm10/refseq_r80/mc9nr/gene_based/mm10__refseq-r80__10kb_up_and_down_tss.mc9nr.feather")
+
+
+## File names after download
+downloadedDBFiles <- c("~/cisTarget_databases/mm10__refseq-r80__500bp_up_and_100bp_down_tss.mc9nr.feather",
+                       "~/cisTarget_databases/mm10__refseq-r80__10kb_up_and_down_tss.mc9nr.feather")
+
+
+## The databases are downloaded only in the case when the files do not exist.
+if( !(file.exists(downloadedDBFiles[1]) & file.exists(downloadedDBFiles[2])) ){
+  
+  ## Create and move to the new folder
+  dir.create("cisTarget_databases");
+  setwd("cisTarget_databases") 
+  for(featherURL in dbFiles)
+  {
+    download.file(featherURL, destfile=basename(featherURL)) # saved in current dir
+    descrURL <- gsub(".feather$", ".descr", featherURL)
+    if(file.exists(descrURL)) download.file(descrURL, destfile=basename(descrURL))
+  }
+  setwd("..")
+  
+}
+########Run Scenic
+#Make folder that is called cisTarget_databases and set as working directory!!!!
+
+exprMat <- Hopx.s@assays$RNA@data
+#exprMat <- exprs(Hopx.m)
+#exprMat <- Hopx.s@assays$RNA@counts
+#exprMat <- log(Hopx.s@assays$RNA@counts+1)
+
+cellInfo <- data.frame(Hopx.s@meta.data)
+
+setwd("D:/Users/Documents/Manuscript_Finale2023/cisTarget_databases")
+scenicOptions <- initializeScenic(org="mgi", dbDir="D:/Users/Documents/Manuscript_Finale2023/cisTarget_databases", nCores=2)
+
+#Copy and paste these files in  into the folder that says cisTarget_databases
+mgi_dbs <- list('500bp'= 'mm10__refseq-r80__500bp_up_and_100bp_down_tss.mc9nr.feather',
+                '10kb' = 'mm10__refseq-r80__10kb_up_and_down_tss.mc9nr.feather')
+db_mcVersion <- 'v10'
+db_path <- getwd()
+
+scenicOptions@settings$dbs <- mgi_dbs
+scenicOptions@settings$dbDir <- db_path
+scenicOptions@settings$db_mcVersion <- db_mcVersion
+scenicOptions@settings$seed <- 123
+
+### Co-expression network
+genesKept <- geneFiltering(exprMat, scenicOptions)
+exprMat_filtered <- exprMat[genesKept, ]
+runCorrelation(exprMat_filtered, scenicOptions)
+runGenie3(exprMat_filtered, scenicOptions)
+scenicOptions@settings$dbs <- scenicOptions@settings$dbs["10kb"] 
+runSCENIC_1_coexNetwork2modules(scenicOptions)
+runSCENIC_2_createRegulons(scenicOptions, coexMethod=c("top5perTarget"))
+runSCENIC_3_scoreCells(scenicOptions, exprMat)
+
+#Heatmap of Regulon per cluster
+
+pdf(paste0(getwd(),"/RegulonAUCHeatmap_Clusters",Sys.Date(),".pdf"))
+
+library(viridis)
+regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC")
+regulonAUC <- regulonAUC[onlyNonDuplicatedExtended(rownames(regulonAUC)),]
+regulonActivity_byCellType <- sapply(split(rownames(cellInfo), cellInfo$FinaleCluster_ag),function(cells) rowMeans(getAUC(regulonAUC)[,cells]))
+regulonActivity_byCellType_Scaled <- t(scale(t(regulonActivity_byCellType), center = T, scale=T))
+
+pheatmap::pheatmap(regulonActivity_byCellType_Scaled[,c("a1","a2","a3","q1","q2","ImA","MA")], fontsize_row=4,
+                   color=viridis(7),
+                   treeheight_row=10, treeheight_col=10, border_color=NA,cluster_cols = F)
+dev.off()
+
+topRegulators <- reshape2::melt(regulonActivity_byCellType_Scaled)
+colnames(topRegulators) <- c("Regulon", "Cluster", "RelativeActivity")
+topRegulators <- topRegulators[which(topRegulators$RelativeActivity>1),]
+topRegulators$Regulon<-gsub('_.*',"",topRegulators$Regulon)
+
+write.csv(topRegulators,"ResultsDirectory/topRegulators.csv")
+
+
+```
+#RNA Velocity
+```{r}
+ldat <- lapply(ldat,function(x) {
+  colnames(x) <-  gsub("Aligned.sortedByCoord.out.bam","",gsub("_Aligned.sortedByCoord.out.bam","",colnames(x)))
+  x
+})
+
+#FULL DataSET With FILTERS
+colnames(ldat[["spliced"]]) <-  gsub("Hopx:","",gsub("Hopx:","",colnames(ldat[["spliced"]])))
+colnames(ldat[["spliced"]]) <-  gsub("Star_output_","",gsub("Star_output_","",colnames(ldat[["spliced"]])))
+
+colnames(ldat[["unspliced"]]) <-  gsub("Hopx:","",gsub("Hopx:","",colnames(ldat[["unspliced"]])))
+colnames(ldat[["unspliced"]]) <-  gsub("Star_output_","",gsub("Star_output_","",colnames(ldat[["unspliced"]])))
+
+colnames(ldat[["spanning"]]) <-  gsub("Hopx:","",gsub("Hopx:","",colnames(ldat[["spanning"]])))
+colnames(ldat[["spanning"]]) <-  gsub("Star_output_","",gsub("Star_output_","",colnames(ldat[["spanning"]])))
+
+head(colnames(ldat[["spanning"]]))
+
+cluster.label <- pData(Hopx.m)$FinalCluster_ag
+cluster.label <- pData(Hopx.m)$FinalCluster_ag
+names(cluster.label)<-rownames(pData(Hopx.m))
+
+pData(Hopx.m)$cell.colors<-"0"
+pData(Hopx.m)[pData(Hopx.m)$Cluster =="a1","cell.colors"]<-"#DC050C"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "q1","cell.colors"]<-"deepskyblue"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "a3","cell.colors"]<-"gold1"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "ImA","cell.colors"]<-"darkolivegreen2"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "a2","cell.colors"]<-"sienna1"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "q2","cell.colors"]<-"deepskyblue"
+pData(Hopx.m)[pData(Hopx.m)$Cluster == "MA","cell.colors"]<-"mediumpurple"
+
+cell.colors<-as.vector(Hopx.m$cell.colors)
+names(cell.colors)<-rownames(Hopx.m)
+
+# exonic read (spliced) expression matrix 
+emat <- ldat$spliced;
+# intronic read (unspliced) expression matrix
+nmat <- ldat$unspliced
+#Check if any unspliced rows have values
+# spanning read (intron+exon) expression matrix
+smat <- ldat$spanning
+
+emat <- emat[rownames(emat) %in% rownames((Hopx.m)),colnames(emat) %in% rownames(pData(Hopx.m))];
+nmat <- nmat[rownames(nmat) %in% rownames((Hopx.m)),colnames(nmat) %in% rownames(pData(Hopx.m))];
+smat <- smat[rownames(smat) %in%  rownames((Hopx.m)),colnames(smat) %in% rownames(pData(Hopx.m))];
+
+# filter expression matrices based on some minimum max-cluster averages
+emat <- filter.genes.by.cluster.expression(emat,cell.colors,min.max.cluster.average = 5)
+nmat <- filter.genes.by.cluster.expression(nmat,cell.colors,min.max.cluster.average = 1)
+smat <- filter.genes.by.cluster.expression(smat,cell.colors,min.max.cluster.average = 0.5)
+
+# look at the resulting gene set
+str(intersect(intersect(rownames(emat),rownames(nmat)),rownames(smat)))
+
+#PCAdistance and UMAP embeddings
+emb<-Hopx.s@reductions$umap@cell.embeddings
+cell.dist <- as.dist(1-armaCor(t(Hopx.s@reductions$pca@cell.embeddings)))
+fitquantile<-0.2
+rvel.pca.cell.distance<- gene.relative.velocity.estimates(emat,nmat,smat,deltaT=1,
+                                                          kCells=10,
+                                                          cell.dist=cell.dist,
+                                                          fit.quantile=fitquantile,
+                                                          n.cores=2, verbose = T,diagonal.quantiles  =T,expression.gradient = "blue",residual.gradient = "green")
+show.velocity.on.embedding.cor(emb,rvel.pca.cell.distance,n=10,scale='sqrt',
+                               cell.colors=ac(cell.colors,alpha=0.5),
+                               cex=3,arrow.scale=3,show.grid.flow=T,
+                               min.grid.cell.mass=0.5,grid.n=20,arrow.lwd=1,
+                               do.par=T,cell.border.alpha = 0.8 ,
+                               n.cores=24,main="Cell_Velocity_HippoSignal",expression.scaling =F, return.details=TRUE)#cc=p1$cc)
+pdf("Velocyto.AllCells_UMAP-4.pdf", onefile = TRUE,width=7.15, height = 4.31)
+VEMB<-show.velocity.on.embedding.cor(emb,rvel.pca.cell.distance,n=20,scale='sqrt',
+                               cell.colors=ac(cell.colors,alpha=0.5),
+                               cex=3,arrow.scale=3,show.grid.flow=T,
+                               min.grid.cell.mass=0.5,grid.n=20,arrow.lwd=1,
+                               do.par=T,cell.border.alpha = 0.1 ,
+                               n.cores=24,main="Cell_Velocity_AllCells.AllAges",expression.scaling =F, return.details=TRUE)#cc=p1$cc)
+dev.off()
+########
+#Top gamma genes with best fit modeling velocyto
+
+TopOrder<-rvel.pca.cell.distance$gamma[order(rvel.pca.cell.distance$gamma,decreasing = T)]
+names(subset(TopOrder,TopOrder > 0.6))
+
+pdf("Velocyto.AllCells_Corrected.pdf", onefile = TRUE,width=8, height = 1.98)
+out_list <- list()
+
+genes<-c(names(subset(TopOrder,TopOrder > 0.6)),"Grin2a","Nfia","Hopx","Nfix","Foxo1")
+genes<-c("Grin2a","Nfia","Hopx","Nfix","Foxo1","Fat4","Ajuba","Mapk14","Sav1","Yap1","Tead1","Tead2")
+
+VelocityPlots_PerGene<-RNAvelocitygenesplot(genelist=genes,emat=emat,nmat=nmat,deltaT=1,kCells = 10,kGenes=1,fit.quantile=fitquantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=i,old.fit=rvel.pca.cell.distance,do.par=T)
+
+print(VelocityPlots_PerGene)
+
+dev.off()
+
+pdf("Velocyto.AllCells_Trajectory_10.pdf", onefile = TRUE,width=6, height = 5)
+x <- show.velocity.on.embedding.eu(emb,rvel.pca.cell.distance,n=10,scale='sqrt',cell.colors=ac(cell.colors,alpha=0.5),
+                                   cex=3,nPcs=10,sigma=2.5,show.trajectories=TRUE,diffusion.steps=400,
+                                   n.trajectory.clusters=7,ntop.trajectories=3,embedding.knn=T,control.for.neighborhood.density=TRUE,n.cores=1)
+dev.off()
+#Show Plot on Monocle embedding once subsetted
+Velocity<-monocle::plot_cell_trajectory(pData(Hopx.m_traj), color_by = "FinalCluster_ag") + scale_color_manual(values = cell.colors)
+
+show.velocity.on.embedding.cor(emb,rvel.pca.cell.distance,n=10,scale='sqrt',
+                               cell.colors=ac(cell.colors,alpha=0.5),
+                               cex=3,arrow.scale=3,show.grid.flow=T,
+                               min.grid.cell.mass=0.5,grid.n=40,arrow.lwd=1,
+                               do.par=T,cell.border.alpha = 0.1 ,
+                               n.cores=24,main="Cell_Velocity_P3P7_All_Hopx.s",expression.scaling =F, return.details=TRUE)#cc=p1$cc)
+  
+```
+# ECDF- Kruskel-W. & Dunn's Testing
+```{r}
+FreqScores <- read_excel("G:/Manuscipt/OriginalData/Statistics_input_ASC&CC_Scores.xlsx",sheet = "Distribution_Freq")
+RawScores <- read_excel("G:/Manuscipt/OriginalData/Statistics_input_ASC&CC_Scores.xlsx")
+
+data<-RawScores[1:2]
+levels(data$group1_A_CC)
+RawScores$group1_A_CC <- ordered(data$group1_A_CC,
+                         levels = c("a1", "a2", "a3"))
+library(dplyr)
+group_by(data, group1_A_CC) %>%
+  summarise(
+    count = n(),
+    mean = mean(data1_A_CC, na.rm = TRUE),
+    sd = sd(data1_A_CC, na.rm = TRUE),
+    median = median(data1_A_CC, na.rm = TRUE),
+    IQR = IQR(data1_A_CC, na.rm = TRUE)
+  )
+#One-way ANOVA followed by two-sided pairwise Dunns test
+active_comparison_CC<-kruskal.test(data1_A_CC ~ group1_A_CC, data = data)
+print(active_comparison_CC)
+
+library(FSA)
+print(dunns_active_comparison_CC<-dunnTest(data1_A_CC ~ group1_A_CC,
+         data=data,
+         method="sidak"))
+#################
+
+data<-RawScores[3:4]
+levels(data$group2_T_CC)
+RawScores$group2_T_CC <- ordered(data$group2_T_CC,
+                         levels = c("a1", "q1", "q2"))
+group_by(data, group2_T_CC) %>%
+  summarise(
+    count = n(),
+    mean = mean(data2_T_CC, na.rm = TRUE),
+    sd = sd(data2_T_CC, na.rm = TRUE),
+    median = median(data2_T_CC, na.rm = TRUE),
+    IQR = IQR(data2_T_CC, na.rm = TRUE)
+  )
+#One-way ANOVA followed by two-sided pairwise Dunns test
+trajectory_comparison_CC<-kruskal.test(data2_T_CC ~ group2_T_CC, data = data)
+print(trajectory_comparison_CC)
+
+print(dunns_trajectory_comparison_CC<-dunnTest(data2_T_CC ~ group2_T_CC,
+         data=data,
+         method="sidak"))
+
+####################
+
+data<-RawScores[5:6]
+levels(data$group3_T_ASC)
+RawScores$group3_T_ASC <- ordered(data$group3_T_ASC,
+                         levels = c("a1", "q1", "q2"))
+group_by(data, group3_T_ASC) %>%
+  summarise(
+    count = n(),
+    mean = mean(data3_T_ASC, na.rm = TRUE),
+    sd = sd(data3_T_ASC, na.rm = TRUE),
+    median = median(data3_T_ASC, na.rm = TRUE),
+    IQR = IQR(data3_T_ASC, na.rm = TRUE)
+  )
+#One-way ANOVA followed by two-sided pairwise Dunns test
+trajectory_comparison_ASC<-kruskal.test(data3_T_ASC ~ group3_T_ASC, data = data)
+print(trajectory_comparison_ASC)
+
+print(dunns_trajectory_comparison_ASC<-dunnTest(data3_T_ASC ~ group3_T_ASC,
+         data=data,
+         method="sidak"))
+
+##########################
+data<-RawScores[7:8]
+levels(data$group4_T_ASC_Age)
+RawScores$group4_T_ASC_Age <- ordered(data$group4_T_ASC_Age,
+                         levels = c("a1", "a2", "a3"))
+
+group_by(data, group4_T_ASC_Age) %>%
+  summarise(
+    count = n(),
+    mean = mean(data4_T_ASC_Age, na.rm = TRUE),
+    sd = sd(data4_T_ASC_Age, na.rm = TRUE),
+    median = median(data4_T_ASC_Age, na.rm = TRUE),
+    IQR = IQR(data4_T_ASC_Age, na.rm = TRUE)
+  )
+#One-way ANOVA followed by two-sided pairwise Dunns test
+trajectory_comparison_ASC_perAge<-kruskal.test(data4_T_ASC_Age ~ group4_T_ASC_Age, data = data)
+print(trajectory_comparison_ASC_perAge)
+
+print(dunn_trajectory_comparison_ASC_perAge<-dunnTest(data4_T_ASC_Age ~ group4_T_ASC_Age,
+         data=data,
+         method="sidak"))
+
+#Concatenated results
+Results.KW<-rbind(active_comparison_CC,trajectory_comparison_CC,trajectory_comparison_ASC,trajectory_comparison_ASC_perAge)
+Results.Dunn<-list(dunns_active_comparison_CC,dunns_trajectory_comparison_CC,dunns_trajectory_comparison_ASC,dunn_trajectory_comparison_ASC_perAge)
+names(Results.Dunn)<-colnames(RawScores)[grepl("data",colnames(RawScores))]
+FullResults.KWDunn<-list(Results.KW,Results.Dunn)
+
+names(FullResults.KWDunn)<- c("KW_allgroups","Dunn's_test")
+sink('Figure2_FullResults.KWDunn.csv')
+print(FullResults.KWDunn)
+sink()
+```
+
+#Trajectory & GO Term analysis
+```{r}
+#Gene identified to have kinetic clustering from CellRouter
+aqMat.genes<- subset(rownames(Hopx.m_traj), rownames(Hopx.m_traj) %in% rownames(cellrouterMain@clusters$M.AQ$exprs))
+qMat.genes<- subset(rownames(Hopx.m_traj_vz),  rownames(Hopx.m_traj) %in% rownames(cellrouterMain@clusters$M.Q$exprs))
+
+library(monocle)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(GOSemSim)
+library(DOSE)  
+
+phenodata <- as.data.frame(Hopx.s@meta.data)
+RNACounts<-as.matrix(Hopx.s@assays$RNA@counts)#For vizualization
+phenodata<-subset(phenodata,phenodata$FinalCluster_ag == "a1" | phenodata$FinalCluster_ag == "q1" | phenodata$FinalCluster_ag == "q2")
+nrow(phenodata)
+
+                 pd <- new('AnnotatedDataFrame', data = as.data.frame(phenodata))
+                 fd <- new("AnnotatedDataFrame",data.frame(gene_short_name = rownames(RNACounts), row.names = rownames(RNACounts)))
+                 Hopx.m.tj.vz<- new('CellDataSet', exprs = as.matrix(RNACounts[,rownames(phenodata)]), phenoData = pd, featureData =fd,expressionFamily = uninormal())
+                 #Hopx.m.tj.vz<- estimateSizeFactors(Hopx.m_traj)
+                 #Hopx.m.tj<-clusterCells(Hopx.m.tj,num_clusters = 4,method='DDRTree',norm_method='none')#3
+                 Hopx.m.tj.vz<-reduceDimension(Hopx.m.tj.vz,max_components = 2,reduction_method = 'DDRTree',verbose = T,pseudo_expr = 0,norm_method = "none")
+                 Hopx.m.tj.vz<-orderCells(Hopx.m.tj.vz)
+                 Hopx.m.tj.vz<-orderCells(Hopx.m.tj.vz,reverse=F)
+                  ##Check###PseduotimePlot
+                 plot_cell_trajectory(Hopx.m.tj.vz, color_by = "Pseudotime")
+
+
+SCTdata<-as.matrix(Hopx.s@assays$SCT@data)#For analysis (log1p)
+phenodata<-subset(phenodata,phenodata$FinalCluster_ag == "a1" | phenodata$FinalCluster_ag == "q1" | phenodata$FinalCluster_ag == "q2")
+nrow(phenodata)
+                 pd <- new('AnnotatedDataFrame', data = as.data.frame(phenodata))
+                 fd <- new("AnnotatedDataFrame",data.frame(gene_short_name = rownames(SCTdata), row.names = rownames(SCTdata)))
+                 Hopx.m.tj<- new('CellDataSet', exprs = as.matrix(SCTdata[,rownames(phenodata)]), phenoData = pd, featureData =fd,expressionFamily = uninormal())
+                 #Hopx.m.tj<- estimateSizeFactors(Hopx.m_traj)
+                 #Hopx.m.tj<-clusterCells(Hopx.m.tj,num_clusters = 4,method='DDRTree',norm_method='none')#3
+                 Hopx.m.tj<-reduceDimension(Hopx.m.tj,max_components = 2,reduction_method = 'DDRTree',verbose = T,pseudo_expr = 0,norm_method = "none")
+                 Hopx.m.tj<-orderCells(Hopx.m.tj)
+                 Hopx.m.tj<-orderCells(Hopx.m.tj,reverse=F)
+
+
+                 p1<-plot_cell_trajectory(Hopx.m.tj, color_by = "FinalCluster_ag",cell_size = 4)+ scale_color_manual(values = NewFigureColors)+theme(text = element_text(size=11))
+                 p2<-plot_cell_trajectory(Hopx.m.tj, color_by = "Age",cell_size=4)+ scale_color_manual(values = NewAgeColors)+theme(text = element_text(size=11))
+                 p3<-plot_cell_trajectory(Hopx.m.tj, color_by = "Pseudotime")
+                 p4<-plot_cell_trajectory(Hopx.m_traj.1, color_by = "State")
+                 
+                 plot_grid(p1,p2,p3,p4,ncol=2,nrow=2)
+
+colname(Hopx.m.tj)["Pseudotime"] <-"Pseudotime.SCT" 
+
+a.q<-subset(phenodata,phenodata$FinalCluster_ag == "a1" | phenodata$FinalCluster_ag == "q1")
+q.maturation<-subset(phenodata,phenodata$FinalCluster_ag == "q1" | phenodata$FinalCluster_ag == "q2")
+
+#GO Anlaysis is output 
+TrajectoryAnalysis<-FullTrajectoryAnalysis(cds= Hopx.m_traj_vz, cds.pt= Hopx.m_traj, cells = rownames(a.q),FDR=0.1,n=5,k.m=5,Trajectory = "A1_Q1& Q1_Q2")
+
+```
+
+#Dynamic GRN Analysis
+```{r}
+cellrouterMain<-CellroutertoMonocleImport(matrix= as.matrix(Hopx.s@assays$RNA@data), allcells = rownames(pData(Hopx.m)), sub_cells1=rownames(a.q), sub_cells2= rownames(q.maturation), pseudotime.aq=a.q$Pseudotime,pseudotime.q = q.maturation$Pseudotime)
+
+names <- unique(names(cellrouterMain@pathsinfo$distr))
+
+cellrouterMain<-correlationPseudotime(cellrouterMain, type='spearman')
+
+corr<-as.double(cellrouterMain@correlation$M.AQ)
+names(corr)<-names(cellrouterMain@correlation$M.AQ)
+cellrouterMain@correlation$M.AQ<-corr
+
+corr<-as.double(cellrouterMain@correlation$M.Q)
+names(corr)<-names(cellrouterMain@correlation$M.Q)
+cellrouterMain@correlation$M.Q<-corr
+
+cellrouterMain <- topGenes(cellrouterMain, 0.8, 0.1)
+cellrouterMain <- smoothDynamics(cellrouterMain, names)
+cellrouterMain <- clusterGenesPseudotime(cellrouterMain, 4) #This take the variable genes
+
+write.csv(as.data.frame(cellrouterMain@topGenes$M.Q),paste0(getwd(),"/TopCorrGenes_MQ.csv"))
+write.table(as.data.frame(cellrouterMain@topGenes$M.AQ),paste0(getwd(),"/TopCorrGenes_AQ.csv"))
+
+save(cellrouterMain, file='ResultsDirectory/CellRouter_Processed.R')
+
+#Build GRN
+grn.data <- buildGRN(cellrouterMain, species = 'Mm', genes.use = rownames(cellrouterMain@pathsinfo$distr[["M.Q"]]), zscore = 5, filename = paste0(getwd(),'/GRN.R'))
+
+#Find Regulators that cause targets to go UP but Regulators are either increasing or decreasing
+grn.scores.up <- grnscores(cellrouterMain,ggrn = grn.data[["GRN"]], tfs= grn.data[["tfs"]], transitions = c("M.AQ","M.Q"), direction='both', dir.targets='up', columns=2, width=8, height=10, flip=TRUE, filename= paste0(getwd(),'ResultsDirectory/aq.qm_regulators_score_up',Sys.Date()))
+
+#Find Regulators that cause targets to go DOWN but Regulators are either increasing or decreasing
+grn.scores.down <- grnscores(cellrouterMain,ggrn = grn.data$GRN, tfs=grn.data$tfs, transitions = c("M.AQ","M.Q"), direction='both', dir.targets='down', columns=2, width=8, height=10, flip=TRUE, filename= paste0(getwd(),'ResultsDirectory/aq.qm_regulators_score_down',Sys.Date()))
+
+saveRDS(grn.scores.up,"grn.scores.up.RDS")
+saveRDS(grn.scores.down,"grn.scores.up.RDS")
+saveRDS(grn.data,"grn.data.RDS")
+saveRDS(grn.data,"grn.data.RDS")
+
+```
+
+#Cell Cycle and Adult Stemness Scoring
+```{r}
+#use TPM:
+counts<-Hopx.s@assays$RNA@counts
+cell_stemness_score <- apply(as.matrix(counts)[c( rownames(counts) %in% WaterfallTop1000$negative_score_genes),colnames(Hopx.m_traj)], 2, function(x) mean(x))
+pData(Hopx.m_traj)$cell_stemness_score <- log2(cell_stemness_score)
+pData(Hopx.m_traj)$no_expression <- cell_stemness_score == 0
+
+pData(Hopx.m_traj) %>%
+  rowwise() %>%
+  mutate(CellCycleMeanScore = mean(c_across(c('S.Phase', 'G2M.Phase')), na.rm=TRUE))
