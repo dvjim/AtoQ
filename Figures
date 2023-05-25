@@ -1,0 +1,415 @@
+```{r}
+library(cowplot)
+library(ggplot2)
+#######################################################  FIGURE 2B-D
+
+#UMAP of 6 Clusters
+pdf("~/PlotDirectory/UMAP_Seurat_6Clusters.pdf",width = 4.15,height=2.31)
+DimPlot(Hopx.s, label = TRUE,group.by =  "FinalCluster_ag",reduction = "umap",pt.size = 2)+scale_color_manual(values=NewFigureColors)
+dev.off()                
+
+#Proportion of cells per Cluster at each age
+t1<-as.matrix(round(prop.table(table(pData(Hopx.m)$Age,pData(Hopx.m)$FinalCluster_ag))*100,1))
+n<-melt(t1)
+n$Var.1<- factor(n$Var.1,levels = c("P3", "P7", "P14"))
+n$Var.2<- factor(n$Var.2,levels = c("a1", "a2", "a3","q1","q2","MA","ImA"))
+names(color_list)<-unique(pData(Hopx.m)$FinalCluster_ag)
+
+pdf("~/PlotDirectory/CellProportions.pdf",width = 4.15,height=2.31)
+p5<-ggplot(n, aes(fill=Var.2, y=value, x=Var.1, fill=Var.2)) + geom_bar(position="fill", stat="identity")+theme() + xlab("Age") +ylab ("Proportion of Clusters")+theme_classic()+theme(text = element_text(size=20))+ scale_fill_manual(values=c("a1"="gold1","q1"="lightcyan","a3"="seagreen","ImA"="azure4","a2"="springgreen3","q2"="deepskyblue","MA"="black"))
+print(p5)
+dev.off()
+
+#Dotplot
+pdf("~/PlotDirectory/DotPlot.pdf",width = 4.15,height=2.31)
+GENES<-c("Hopx","Vim","Nes","Cdk1","Mki67","Neurod4","Eomes","Aldh1l1","S100b")
+DotPlot(metadata=pData(Hopx.m),markers.to.plot=GENES,seuratobject=Hopx.s,clusters=c("a2","a3","a1","q1","q2","ImA","MA"))
+dev.off()
+#######################################################  FIGURE 2E  
+
+#RNA Velocity UMAP
+pdf("Velocyto.AllCells_UMAP-4.pdf", onefile = TRUE,width=7.15, height = 4.31)
+VEMB<-show.velocity.on.embedding.cor(emb,rvel.pca.cell.distance,n=20,scale='sqrt',
+                               cell.colors=ac(cell.colors,alpha=0.5),
+                               cex=3,arrow.scale=3,show.grid.flow=T,
+                               min.grid.cell.mass=0.5,grid.n=20,arrow.lwd=1,
+                               do.par=T,cell.border.alpha = 0.1 ,
+                               n.cores=24,main="Cell_Velocity_AllCells.AllAges",expression.scaling =F, return.details=TRUE)#cc=p1$cc)
+dev.off()
+
+#######################################################  FIGURE F-J 
+library(plyr)
+indx<-order(pData(Hopx.m_traj)[,c("Pseudotime.SCT","FinalCluster_ag")])
+cellorder<-rownames(pData(Hopx.m_traj)[indx,])[c(1:109)]
+
+#Violin Plot of Cycling genes across trajectory
+pdf("~/PlotDirectory/ViolinPlots.pdf",width = 4.15,height=2.31)
+GENES<-c("Mcm7","Pcna","Cdk4")
+Vlp1<-ViolinPlot(metadata=pData(Hopx.m_traj),matrix=TPM,id=c("Age","FinalCluster_ag","Row.names"),group="comparison across and cluster",GENES=GENES)
+print(Vlp1)
+dev.off()
+
+#Gradient heatmap of cell scores across pseudotime
+newCols <- colorRampPalette(grDevices::rainbow(length(unique(pData(Hopx.m_traj)$FinalCluster_ag))))
+annoCol <- newCols(length(unique(pData(Hopx.m_traj)$FinalCluster_ag)))
+annoCol<-NewFigureColors[c(1,2,6)]
+annoCol <- list(FinalCluster_ag = annoCol,Age=NewAgeColors)
+colpal<-rep(list(viridis (200)),length(colnames(pData(Hopx.m_traj)[,c("CellCycleMeanScore","cell_stemness_score")])))
+names(colpal)<-colnames(pData(Hopx.m_traj)[,c("CellCycleMeanScore","cell_stemness_score")])
+annoCol<-append(annoCol,colpal)
+
+
+#Proportion of Quiescent clusters
+
+sb<-subset(pData(Hopx.m), pData(Hopx.m)$FinalCluster_ag %in% c("q1", "q2"))
+t1<-as.matrix(round(prop.table(table(sb$Age,sb$FinalCluster_ag))*100,1))
+n<-melt(t1)
+n$Var.1<- factor(n$Var.1,levels = c("P3", "P7", "P14"))
+names(color_list)<-unique(pData(Hopx.m)$FinalCluster_ag)
+
+pdf("~/PlotDirectory/QuiescentCellProportions.pdf",width = 4.15,height=2.31)
+p5<-ggplot(n, aes(fill=Var.2, y=value, x=Var.1, fill=Var.2)) + geom_bar(position="fill", stat="identity")+theme() + xlab("Age") +ylab ("Proportion of Clusters")+theme_classic()+theme(text = element_text(size=20))+ scale_fill_manual(values=c(NewFigureColors))
+print(p5)
+dev.off()
+
+
+#######################################################  FIGURE S2 A  
+#Heatmap of all cells 
+
+Glial<-c("Nfia","Sox9","Aldoc","Apoe","Gja1","Aqp4")
+Neurogenic<-c("Eomes","Neurog2","Sox11","Prox1","Dcx")
+stemcellgenes<-c("Hopx","Hes1","Hes5","Pax6","Nes","Sox2","Vim","Notch2")
+cellcyclegenes<-c("Top2a","Mki67","Mcm6","Cdk1")
+
+anno_colors<-list(SC_0.2=NewFigureColors.Orig,Age=NewAgeColors)
+
+pdf("~/PlotDirectory/Heatmap_AllCells_Processing.pdf",width = 4.15,height=2.31)
+HMat<-Hopx.s@assays$RNA@data[rownames(Hopx.s@assays$RNA@data) %in% c(Glial,Neurogenic,stemcellgenes,cellcyclegenes),]
+HM1<-as.ggplot(pheatmap((HMat),color = viridis::inferno(100),fontsize=10,fontsize_number = 0.4 * fontsize,cluster_cols = T,cluster_rows =T,annotation_col= , annotation_colors = anno_colors,show_colnames=F,show_rownames = T,cellwidth = 4, cellheight = 4*2))
+dev.off()
+
+#######################################################  FIGURE S2 B 
+
+#UMAP of 6 Clusters
+pdf("~/PlotDirectory/THESIS/UMAP_Seurat_6Clusters.pdf",width = 4.15,height=2.31)
+DimPlot(Hopx.s, label = TRUE,group.by =  "label.Round1.Cluster",reduction = "umap",pt.size = 2)+scale_color_manual(values=NewFigureColors.Orig)
+dev.off()
+
+#######################################################  FIGURE S2 C,D,E,F 
+pdf("~/PlotDirectory/KernalDensity_ViolinPlot_AstrocyteExpression.pdf",width = 4.15,height=2.31)
+Plot_ExpressionDensity_Astrocytes<-plot_density(Hopx.s, c("Abhd3","Gabrg1","Gjb6"), joint = TRUE,reduction = "umap" )
+print(Plot_ExpressionDensity_Astrocytes)
+
+GENES<-c("Aldh1l1","Cd38","S100b","Fabp7","Abhd3","Gabrg1","Gjb6")
+data_names<-mget(c("GENES"))
+
+AstroViolinPlot<-ViolinPlot(metadata=pData(Hopx.m),matrix=TPM,id=c("Age","FinalCluster_ag","Row.names"),group="comparison across and cluster")
+print(AstroViolinPlot)
+
+CorrHM<-pheatmap(mtx_corr,cluster_rows = T,cluster_cols=T,color=colmat(200),border_color = NA,na_col="red",height=4, width = 8,show_colnames=T)
+print(CorrHM)
+
+dev.off()
+#######################################################  FIGURE S2 G 
+pdf("~/PlotDirectory/TopRegulatorsRAS.pdf",width = 4.15,height=2.31)
+#Order genes by TopRegulator Clusters
+topRegulators<-topRegulators[order(factor(topRegulators$FinalCluster_ag, levels =unique(Hopx.s@meta.data$FinalClusters_ag))), ]
+pheatmap::pheatmap(regulonActivity_byCellType_Scaled[unique(topRegulators$Regulon),unique(Hopx.s@meta.data$FinalClusters_ag)], fontsize_row=6,
+                   color=viridis(200),
+                   treeheight_row=5, treeheight_col=5, border_color=NA,cluster_cols = F,cluster_rows = F,cellwidth = 10, cellheight = 10)
+dev.off()
+######################################################  FIGURE S2 H-L 
+
+#UMAP of Phase 
+pdf("~/ResultsDirectory/THESIS/UMAP_Seurat_PhaseDistribuion.pdf",width = 4.15,height=2.31)
+DimPlot(Hopx.s, label = TRUE,group.by =  "label.Round1.Phase",reduction = "umap", pt.size = 2)+ scale_color_manual(values=c("G1"="darkblue","G2M"="red4","S"="red"))#+ theme(legend.position = "None")
+dev.off()
+
+#UMAP of Mki67 Nebulosa density plot of expression 
+pdf("~/ResultsDirectory/THESIS/UMAP_Nebulosa_Expressiondensity_Mik67.pdf",width = 4.15,height=2.31)
+plot_density(Hopx.s, c("Mki67"), joint = FALSE,reduction = "umap",size = 3 )
+dev.off()
+
+#Pseudotime cell ordering
+pdf("~/ResultsDirectory/THESIS/MonoclePseudotimeOrdering.pdf",width = 2.31,height=2.31)
+plot_cell_trajectory(Hopx.m_traj, color_by = "Pseudotime.SCT",cell_size=2)#+ scale_color_manual(values = NewAgeColors)+theme(text = element_text(size=11))
+dev.off()
+
+#UMAP of Ages
+pdf("~/ResultsDirectory/THESIS/UMAP_Seurat_AgeDistribuion.pdf",width = 4.15,height=2.31)
+DimPlot(Hopx.s, label = TRUE,group.by =  "Age",reduction = "umap", pt.size = 2)+scale_color_manual(values=c("P3"="#FF00CC","P7"="#9900FF", "P14"= "#0000FF"))#+ theme(legend.position = "None")
+dev.off()
+
+pdf("~/ResultsDirectory/THESIS/MonoclePseudotimeAge.pdf",width = 3,height=4.15)
+plot_cell_trajectory(Hopx.m_traj, color_by = "Age",cell_size=2)+ scale_color_manual(values = NewAgeColors)+ theme(legend.position = "None")#+theme(text = element_text(size=11))
+dev.off()
+
+
+######################################################  FIGURE 3C and 3D
+library(ggplot2)
+
+pdf("~/PlotDirectory/GO_ExampleGenes.pdf",width = 4.15,height=2.31)
+
+GenesForFigure<-list()
+v0<-c()
+GOTerm.Mito<-subset(eg.MQplotting@compareClusterResult,eg.MQplotting@compareClusterResult$ID %in% c("GO:0007005"))[,"geneID"]
+GOTerm.Auto<-subset(eg.MQplotting@compareClusterResult,eg.MQplotting@compareClusterResult$ID %in% c("GO:0061919"))[,"geneID"]
+GOTerm.Ribo<-subset(eg.MQplotting@compareClusterResult,eg.MQplotting@compareClusterResult$ID %in% c("GO:0006979"))[,"geneID"]
+GOTerms<-c("GOTerm.Mito","GOTerm.Auto","GOTerm.Ribo")
+data_names<-mget("GOTerms")
+
+for(j in 1:length(data_names$GOTerms[1:2])){
+   x<-data_names$GOTerms[j]
+   g<-get(x)
+for (i in 1:length(g)){
+   v<- strsplit(g[i],"/")
+  
+   
+}
+   v0<-c(v0,v[1][[1]])
+   GenesForFigure[[j]]<-v0
+   names(GenesForFigure)<-GOTerms
+} 
+
+GENES<-GenesForFigure
+ViolinPlot2<-ViolinPlot(metadata=pData(Hopx.m),matrix=TPM,id=c("Age","FinalCluster_ag","Row.names"),group="comparison",GENES=GENES)
+
+print(ViolinPlot2)
+
+#Vizualizations used RNA rather than SCT as input for monocle
+#Pseudotime plots
+PlotPseudo_aq<-list()
+for (i in 1:GENES){
+  #genes<-Cluster_genes_list_2[[i]]$Gene[Cluster_genes_list_2[[i]]$Gene %in% c(Topup,Topdown)]
+  p<-plot_genes_in_pseudotime(Hopx.m_traj_vz[rownames(Hopx.m_traj_vz) %in% c("Atg12","Becn1","Dnm1l","Gabarap","Npc1","Ulk2","Udac1","Psap","Mt3"),],cell_size = 2,
+  nrow =round(length(GENES)/2), ncol = round(length(GENES)/2), panel_order = NULL,color_by = "FinalCluster_ag",
+  trend_formula = "~ sm.ns(Pseudotime, df=3)")+scale_color_manual(values=NewFigureColors)
+PlotPseudo_aq[[i]]<-p
+}
+print(p)
+
+dev.off()
+
+###################################################### Figure 3E
+
+TFL<- unique(names(c(grn.scores.down$M.Q$scores,grn.scores.up$M.Q$scores,grn.scores.up$M.AQ$scores,grn.scores.down$M.AQ$scores)))# scores less than 0
+mat<-as.matrix(Hopx.s@assays$RNA@data[TFL,rownames(ordercells)])
+mat_breaks <- quantile_breaks(mat, n = 200)
+
+ordercells<- pData(Hopx.m_traj)[order(pData(Hopx.m_traj)$Pseudotime, decreasing = F), ]
+
+window <- 20
+step <- 1
+
+pdf(paste0(getwd(),"PlotDirectory/GRN_Heatmap.pdf"), height = 6,width = 4) 
+pheatmap( mat[order(apply(t(rollapply(t(mat), width=window, by=step, FUN=mean)), 1, which.max)), ],cluster_rows = FALSE,cluster_cols=FALSE,color=viridis(length(mat_breaks) - 1),border_color = NA,na_col="red",breaks=mat_breaks,height=4, width = 8,show_colnames=F, annotation_col = pData(Hopx.m_traj)[rownames(ordercells[,]),c("FinalCluster_ag","Age")],annotation_colors = annoCol)
+
+dev.off()
+
+###################################################### FIGURE 3F & 3H
+
+#Find Regulators that cause targets to go UP but Regulators are either increasing or decreasing
+grn.scores.up <- grnscores(cellrouterMain,ggrn = grn.data[["GRN"]], tfs= grn.data[["tfs"]], transitions = c("M.AQ","M.Q"), direction='both', dir.targets='up', columns=2, width=8, height=10, flip=TRUE, filename= paste0(getwd(),'aq.qm_regulators_score_up.11.1.2022'))
+
+#Find Regulators that cause targets to go DOWN but Regulators are either increasing or decreasing
+grn.scores.down <- grnscores(cellrouterMain,ggrn = grn.data$GRN, tfs=grn.data$tfs, transitions = c("M.AQ","M.Q"), direction='both', dir.targets='down', columns=2, width=8, height=10, flip=TRUE, filename= paste0(getwd(),'/aq.qm_regulators_score_down'))
+
+#######FIGURE 3F 3G(pseudotime and heatmap)
+
+#Identify TF going up and down in expression across A-->Q trajectory & Q1-->Q2 trajectory 
+GRNTargetResults<-GRNTargetHeatmap(grn.scores.up=grn.scores.up,grn.scores.down=grn.scores.down, metadata=pData(Hopx.m_traj), cell1= rownames(a.q),cell2= rownames(q.maturation),id= c("FinalCluster_ag","Age")) 
+
+
+FigureGenes<-c("Npas3","Hmgb2","Nfix","Sox9")
+cell1= rownames(a.q)
+cell2= rownames(q.maturation)
+ordercells <- pData(Hopx.m_traj)[order(pData(Hopx.m_traj)$Pseudotime.SCT, decreasing = F), ]
+ordercells_1<-subset(ordercells,rownames(ordercells) %in% cell1)
+ordercells_2<-subset(ordercells,rownames(ordercells) %in% cell2)
+
+pdf(paste0(getwd(),"PlotDirectory/GRN_Heatmap.pdf"), height = 6,width = 4) 
+
+plot_genes_in_pseudotime(Hopx.m_traj_vz[FigureGenes,rownames(ordercells_1)], cell_size = 2,nrow = NULL, ncol = 1, panel_order = FigureGenes, color_by = "FinalCluster_ag")+ scale_color_manual(values= NewFigureColors)
+plot_genes_in_pseudotime(Hopx.m_traj_vz[FigureGenes,rownames(ordercells_2)], cell_size = 2,nrow = NULL, ncol = 1, panel_order = FigureGenes, color_by = "FinalCluster_ag")+ scale_color_manual(values= NewFigureColors)
+
+dev.off()
+
+library(ggplot2)
+library(directlabels)
+
+g1 <- ggplot(results$data, aes(x=Pseudotime.SCT, y=expectation, group=feature_label, colour=feature_label)) +
+              theme_bw() + geom_line(size=1) + xlab('Metabolic Shifts Across Pseudotime') +
+              guides(col=guide_legend(direction="vertical")) + #, nrow = 2
+              theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                    axis.text.x=element_blank(), axis.ticks=element_blank(),
+                    legend.position = "right",
+                    panel.border = element_blank()) + 
+  geom_point(data =results$data,  aes(x=Pseudotime.SCT, y=0, color=FinalCluster_ag))+
+ # geom_tile(data =results$data, aes(x=Pseudotime.SCT, y=-1, colour=Age))+
+ # geom_tile(data =results$data, aes(x=Pseudotime.SCT, y=-2, colour=label.Round1.Active))+
+  geom_dl(aes(label = feature_label), method = list(dl.trans(x = x + .02), "last.points"))+
+              #theme(axis.line.x = element_line(color="black", size = 0.5))#,
+              #       axis.line.y = element_line(color="black", size = 0.5))
+               scale_color_manual(values=c(col, NewAgeColors,NewFigureColors,col1)   )
+g1
+
+
+plots <- list(FigureGenes)
+            x_axis <- 1:length(pData(Hopx.m_traj)$Pseudotime.SCT) #trajectory
+            for(gene_id in geneList){
+              y_axis <- as.numeric(pData(Hopx.m_traj)[ordercells_1, gene_id])
+              lo <- loess(y_axis~x_axis)
+              xl <- seq(min(x_axis),max(x_axis), (max(x_axis) - min(x_axis))/50)
+              y_axis <- predict(lo,xl)
+              y_axis <- rescale(y_axis, newrange = c(0,1))
+            
+              df <- data.frame(cells=1:length(y_axis), Expression=as.numeric(y_axis))
+              df$gene <- gene_id
+              df$cells <- factor(df$cells, levels=df$cells)
+              num_subpops <- length(unique(df$population))
+              plots[[gene_id]] <- df
+            }
+            tables <- do.call(rbind, plots)
+            #tables$Pseduotime<- pData(Hopx.m_traj)[cellorder,"Pseudotime.SCT"]
+            labels <- x <- sapply(strsplit(as.vector(tables$gene), split='__', fixed=TRUE), function(x){x[1]})
+            tables$gene <- labels
+            tables$Expression <- rescale(tables$Expression, newrange = c(0,1))
+            g1 <- ggplot(tables, aes(x=cells, y=Expression, group=gene, colour=gene)) +
+              theme_bw() + geom_line(size=1) + xlab('CellRouter trajectory') +
+              guides(col=guide_legend(direction="vertical")) + #, nrow = 2
+              theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                    axis.text.x=element_blank(), axis.ticks=element_blank(),
+                    legend.position = "right",
+                    panel.border = element_blank()) +
+              theme(axis.line.x = element_line(color="black", size = 0.5),
+                    axis.line.y = element_line(color="black", size = 0.5))+
+              scale_color_manual("", values=rainbow(length(geneList)))+
+              geom_point(data =pData(Hopx.m_traj),  aes(x=Pseudotime.SCT, y=0, color=FinalCluster_ag))+
+  
+  geom_tile(data =pData(Hopx.m_traj), aes(x=Pseudotime.SCT, y=-1, colour=Age))+
+  geom_tile(data =pData(Hopx.m_traj), aes(x=Pseudotime.SCT, y=-2, colour=label.Round1.Active))+
+  geom_dl(aes(label =  Autophagy), method = list(dl.trans(x = x + .02), "last.points"))+
+  geom_dl(aes(label =  Ros), method = list(dl.trans(x = x + .02), "last.points"))
+
+###################################################### FIGURE S3A-S3B
+            
+#Heatmap of all Regulon targets for Sox9
+            
+targetsM.AQ<-grn.scores.up$M.AQ$targets$Sox9
+targetsM.Q<-grn.scores.up$M.Q$targets$Sox9
+
+Sox9Network<-subset(l,l$network == "Sox9")
+topSox9Targets<-unique(Sox9Network[order(Sox9Network[,"color"],decreasing=TRUE),]$name)
+#Colorweight<-unique(Sox9Network[order(Sox9Network[,"color"],decreasing=TRUE),]$color)
+
+topSox9Targets<-distinct(Sox9Network[order(Sox9Network[,"color"],decreasing=TRUE),][,c("name","color")])
+topSox9Targets.MAQ<-topSox9Targets[grep("M.AQ",rownames(topSox9Targets)),]
+topSox9Targets.MAQ<-topSox9Targets.MAQ[which(topSox9Targets.MAQ$name %in% targetsM.AQ),]
+
+topSox9Targets.MQ<-topSox9Targets[grep("M.Q",rownames(topSox9Targets)),]
+topSox9Targets.MQ<-topSox9Targets.MQ[which(topSox9Targets.MQ$name %in% targetsM.Q),]
+
+ph.1<-pheatmap(exprs(Hopx.m_traj[topSox9Targets.MAQ$name,rownames(a.q)]),cluster_rows = F,cluster_cols=FALSE,border_color = NA,na_col="red",color=viridis(100), annotation_col = pData(Hopx.m_traj)[rownames(a.q),c("FinalCluster_ag","Age","cell_stemness_score","CellCycleMeanScore")],annotation_colors = annoCol,show_colnames = F)
+
+ph.2<-pheatmap(exprs(Hopx.m_traj[topSox9Targets.MQ$name,rownames(q.maturation)]),cluster_rows = F,cluster_cols=FALSE,border_color = NA,na_col="red",color=viridis(100), annotation_col = pData(Hopx.m_traj)[rownames(q.maturation),c("FinalCluster_ag","Age","cell_stemness_score","CellCycleMeanScore")],annotation_colors = annoCol,show_colnames = F)
+
+
+ph_r.MAQ = rowAnnotation(Target_weight = anno_barplot(topSox9Targets.MAQ$color))
+ph_r.MQ = rowAnnotation(Target_weight = anno_barplot(topSox9Targets.MQ$color))
+
+pdf(paste0(getwd(),"PlotDirectory/CellRouterDynamicTFHeatmapSox9.pdf"), height = 6,width = 4) 
+
+HM1<-ph.1+ph_r.MAQ
+HM2<-ph.2+ph_r.MQ
+
+dev.off()
+
+#Heatmap of all Regulon targets for Nfix
+
+targetsM.AQ<-grn.scores.down$M.AQ$targets$Nfix
+targetsM.Q<-grn.scores.down$M.Q$targets$Nfix
+
+NfixNetwork<-subset(l,l$network == "Nfix")
+topNfixTargets<-topNfixTargets<-unique(NfixNetwork[order(NfixNetwork[,"color"],decreasing=FALSE),]$name)
+#Colorweight<-unique(NfixNetwork[order(NfixNetwork[,"color"],decreasing=TRUE),]$color)
+
+topNfixTargets<-distinct(NfixNetwork[order(NfixNetwork[,"color"],decreasing=TRUE),][,c("name","color")])
+topNfixTargets.MAQ<-topNfixTargets[grep("M.AQ",rownames(topNfixTargets)),]
+topNfixTargets.MAQ<-topNfixTargets.MAQ[which(topNfixTargets.MAQ$name %in% targetsM.AQ),]
+
+topNfixTargets.MQ<-topNfixTargets[grep("M.Q",rownames(topNfixTargets)),]
+topNfixTargets.MQ<-topNfixTargets.MQ[which(topNfixTargets.MQ$name %in% targetsM.AQ),]
+
+annoCol <- list(FinalCluster_ag = annoCol,Age=NewAgeColors)
+
+mat<-as.matrix(exprs(Hopx.m_traj[topNfixTargets.MAQ$name,c(rownames(a.q),rownames(q.maturation))]))
+mat_breaks <- quantile_breaks(mat, n = 200)
+
+
+ph.3<-pheatmap(as.matrix(exprs(Hopx.m_traj[topNfixTargets.MAQ$name,rownames(a.q)])),cluster_rows = F,cluster_cols=FALSE,border_color = NA,na_col="red",color=viridis(100), annotation_col= pData(Hopx.m_traj)[rownames(ordercells[rownames(a.q),]),c("FinalCluster_ag","Age")],annotation_colors = annoCol,show_colnames = F,show_rownames = T,gaps_row = seq(3,length(df$genenames), by =2))
+
+ph.4<-pheatmap(as.matrix(exprs(Hopx.m_traj[topNfixTargets.MQ$name,rownames(q.maturation)])),cluster_rows = F,cluster_cols=FALSE,border_color = NA,na_col="red",color=viridis(100), annotation_col= pData(Hopx.m_traj)[rownames(ordercells[rownames(q.maturation),]),c("FinalCluster_ag","Age")],annotation_colors = annoCol,show_colnames = F,show_rownames = T)
+
+
+library(ComplexHeatmap)
+ph_r.MAQ.Nfix = rowAnnotation(Target_weight = anno_barplot(topNfixTargets.MAQ$color))
+ph_r.MQ.Nfix = rowAnnotation(Target_weight = anno_barplot(topNfixTargets.MQ$color))
+
+pdf(paste0(getwd(),"PlotDirectory/CellRouterDynamicTFHeatmapNfix.pdf"), height = 6,width = 4) 
+
+HM3<-ph.3 + ph_r.MAQ.Nfix
+HM4<-ph.4 + ph_r.MQ.Nfix
+
+dev.off()
+
+#Alluvial Plot 
+aluv.nfix<-ggplot(topNfixTargets,
+  aes(x = Trajectory, stratum = color, alluvium = name,fill = color, label = name)) +
+  geom_flow(stat = "alluvium", lode.guidance = "backfront",color = "darkgray") +
+  geom_stratum(reverse = TRUE) +
+  stat_stratum(geom = "text", aes(label = name),decreasing = TRUE)+
+  stat_alluvium(geom = "text", aes(fill = color, label = name),aes.bind = "flows")
+  theme(legend.position = "bottom") +
+  ggtitle("Target Weight Change Across Trajectory=")
+  
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(nr = 1, nc = 3)))
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+
+pdf()
+draw(HM3,newpage = FALSE)
+upViewport()
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 3))
+draw(HM4,newpage = FALSE)
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 2))
+print(aluv.nfix,newpage = FALSE)
+
+upViewport()
+
+
+aluv.nfix<-ggplot(topSox9Targets,
+  aes(x = Trajectory, stratum = color, alluvium = name,fill = color, label = name)) +
+  geom_flow(stat = "alluvium", lode.guidance = "backfront",color = "darkgray") +
+  geom_stratum(reverse = TRUE) +
+  stat_stratum(geom = "text", aes(label = name),decreasing = TRUE)+
+  stat_alluvium(geom = "text", aes(fill = color, label = name),aes.bind = "flows")
+  theme(legend.position = "bottom") +
+  ggtitle("Target Weight Change Across Trajectory=")
+  
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(nr = 1, nc = 3)))
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 1))
+
+pdf()
+draw(HM1,newpage = FALSE)
+upViewport()
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 3))
+draw(HM2,newpage = FALSE)
+
+pushViewport(viewport(layout.pos.row = 1, layout.pos.col = 2))
+print(aluv.nfix,newpage = FALSE)
+
+upViewport()
