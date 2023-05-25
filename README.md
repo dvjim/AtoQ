@@ -20,14 +20,14 @@ proliferation to quiescence but is a multi-step developmental process with defin
 [DIO] 
 
 * Code used for the next-generation single-cell RNA sequencing analysis accompanying the manuscript.
-* Raw sequencing data can be found at GEO under the SuperSeries accession GSEXXX.
+* Raw sequencing data can be found at GEO under the SuperSeries accession GSE232833.
 ## Highlights
 ***
   * NSC development into an adult state is a multi-step process
   * NSC occupancy in the G2/M cell cycle phase increases before quiescence acquisition
   * Molecular cascade underlying NSC quiescence acquisition and subsequent maturation
   * Metabolic changes in autophagy &amp; ROS occur during early and late NSC development
-  * 
+  
 ## Methods
 ***
 Please see manuscript for full detail of methods. Below is an outline of general processes taken in data collection and analysis
