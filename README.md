@@ -39,8 +39,8 @@ Please see manuscript for full detail of methods. Below is an outline of general
   * Clustering using Monocle 
 * Data Analysis 
    * Creation of pseudotime trajectory and identify sub-trajectories
-   * Static Gene Regulatory Networks of clusters
+   * Static Gene Regulatory Networks (GRN) of clusters
    * Identification of variable gene aross pseuotime with kinetic patterns 
-   * Dyanimc Gene Regulatory Networks of sub-trajectory
+   * Dyanimc Gene Regulatory Networks (GRN) of sub-trajectory
    * Gene Ontological Analysis using clusterProfiler 
 
