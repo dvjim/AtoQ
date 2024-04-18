@@ -461,7 +461,6 @@ save(Hopx.s.markers, file=paste0(getwd(),"/results/DataProcessing_results/Hopx.s
 #######
 
 #load Hopx_matrix before contaminate cells filtered out
-load("~/Manuscript_Finale2023/Manuscript_2023-06-30/results/DataProcessing_results/Hopx_matrix_PreCellFiltering2023-07-12.R")
 
 keep.cells.pca<-subset(colnames(Hopx_matrix),!colnames(Hopx_matrix) %in% remove.pca)
 length(keep.cells.pca)
@@ -550,7 +549,7 @@ clusters<-levels(DentateAllAges@meta.data$characteristicscellcluster)
 
 #Select Astro-adult,Astro-juv,Immature-Astro,RGL,RGL_young
 LA.raw.data <- as.matrix(GetAssayData(DentateAllAges, slot = "counts")[, WhichCells(DentateAllAges, ident = c( "Astro-adult","Astro-juv","Immature-Astro","RGL","RGL_young"))])
-save(LA.raw.data, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/LA.raw.data_originalrun_09.30.21_",Sys.Date(),".R"))
+save(LA.raw.data, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/LA.raw.data",Sys.Date(),".R"))
 
 #CommonGenes.Linnarson<-rownames(LA.raw.data)[which(rownames(LA.raw.data) %in% rownames(Hopx.m))]
 #11526 genes
@@ -570,14 +569,14 @@ Split.list<-list(DentateAllAges,Hopx.s.l)
 Split.list <- lapply(X = Split.list, FUN = function(x) {
     x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 3000)
 })
-save(Split.list, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Split.list_originalrun_09.30.21_",Sys.Date(),".R"))
+save(Split.list, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Split.list",Sys.Date(),".R"))
 
 options(future.globals.maxSize=2845835264 )#2714*1024^2
 
 features <- SelectIntegrationFeatures(object.list = Split.list )
 Split.list <- PrepSCTIntegration(object.list = Split.list, anchor.features = features, verbose = FALSE)
 Astro.anchors <- FindIntegrationAnchors(object.list = Split.list, anchor.features = features,normalization.method="SCT")
-save(Astro.anchors, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Astro.anchors_originalrun_09.30.21",Sys.Date(),".R"))
+save(Astro.anchors, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Astro.anchors",Sys.Date(),".R"))
 
 # this command creates an 'integrated' data assay
 DG.combined <- IntegrateData(anchorset = Astro.anchors)
@@ -590,7 +589,7 @@ DG.combined <- RunPCA(DG.combined, npcs = 30, verbose = FALSE)
 DG.combined <- RunUMAP(DG.combined, reduction = "pca", dims = 1:30)
 DG.combined <- FindNeighbors(DG.combined, reduction = "pca", dims = 1:30)
 DG.combined <- FindClusters(DG.combined, resolution = 0.5)
-save(DG.combined, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/DG.combined_originalrun_09.30.21",Sys.Date(),".R"))
+save(DG.combined, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/DG.combined",Sys.Date(),".R"))
 
 #######
 #Identify Cluster Markers
@@ -605,7 +604,7 @@ DG.combined.markers %>%
        slice_max(n = 10, order_by = avg_log2FC)#n=2
 
 DG.combined.markers<-subset(DG.combined.markers,DG.combined.markers$p_val_adj < 0.05)
-save(DG.combined.markers, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/DG.combined.markers_originalrun_09.30.21",Sys.Date(),".R"))
+save(DG.combined.markers, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/DG.combined.markers",Sys.Date(),".R"))
 
 #######
 #Correlation among all clusters
@@ -615,7 +614,7 @@ save(DG.combined.markers, file=paste0(getwd(),"/results/LinnarsonDataCorrelation
 groups <- DG.combined@meta.data[, c("characteristicscellcluster")]
 
 pb_DG <- aggregate.Matrix(as.data.frame(t(DG.combined@assays$integrated@scale.data)), groupings = groups, fun = "sum")#This is in question
-save(pb_DG, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Linnarson_merged_originalrun_09.30.21_",Sys.Date(),".R"))
+save(pb_DG, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Linnarson_merged",Sys.Date(),".R"))
 
 # n1<-rownames(pb_DG)[grep("Astro-adult",rownames(pb_DG))]
 # n2<-rownames(pb_DG)[grep("Astro-juv",rownames(pb_DG))]
@@ -632,23 +631,21 @@ COI<-c( "ImA","MA","Astro-adult","Astro-juv","Immature-Astro","RGL","RGL_young")
 
 #Subpb<-pb_DG[rownames(pb_DG) %in% COI,]
 Subpb_DG<-pb_DG[rownames(pb_DG) %in% COI, colnames(pb_DG) %in% DG.combined.markers$gene]
-save(Subpb_DG, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Subpb_DG_originalrun_09.30.21",Sys.Date(),".R"))
+save(Subpb_DG, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/Subpb_DG",Sys.Date(),".R"))
 
 
 colmat <- colorRampPalette(c("red", "white", "blue"))
 corr <- round(cor(as.matrix(t(Subpb_DG))), 1)#Subpb
-#corr <- round(cor(as.matrix(t(Subpb))), 2)#Subpb
-#corr <- round(cor(as.matrix(t(pb_DG))), 2)#Subpb
 corr1 <- as.data.frame(as.table(corr))
-#corr1 <- subset(corr1, Freq < 0.4)  
 print(corr1)
+
 corr1 <- corr1[order(-abs(corr1$Freq)),] #sort by highest correlation
 mtx_corr <- as.data.frame(reshape2::dcast(corr1, Var1~Var2, value.var="Freq"))#turn corr back into matrix in order to plot with corrplot
 mtx_corr[is.na(mtx_corr)] <- 0 
 rownames(mtx_corr) <- mtx_corr$Var1
 mtx_corr<-mtx_corr[,-1]
-save(corr1, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/corr1_originalrun_09.30.21",Sys.Date(),".R"))
-save(mtx_corr, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/mtx_corr_originalrun_09.30.21",Sys.Date(),".R"))
+save(corr1, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/corr1",Sys.Date(),".R"))
+save(mtx_corr, file=paste0(getwd(),"/results/LinnarsonDataCorrelation_results/mtx_corr",Sys.Date(),".R"))
 
 
 mtx_corr<-mtx_corr[!rownames(mtx_corr) %in% c("MA","ImA"),rownames(mtx_corr) %in% c("MA","ImA") ]
@@ -663,22 +660,17 @@ rm(corr)
 rm(corr1)
 rm(mtx_corr)
 
-sessionInfo()
+
 #######
 #Interested only in MA vs ImA correlations against Linnarson dataset
 #######
 
 mtx_corr<-mtx_corr[!rownames(mtx_corr) %in% c("MA","ImA"),rownames(mtx_corr) %in% c("MA","ImA") ]
 
-mtx_corr_subsettedbyDEG <- read.csv("~/Manuscript_Finale2023/results/LinnarsonDataCorrelation_results/mtx_corr_subsettedbyDEG.csv",row.names = 1)#original run 09/30/21 saved 100521.RData
 pdf(paste0(getwd(),"/results/LinnarsonDataCorrelation/Linnarson_Astrocyte_Correlation",Sys.Date(),".pdf"), width=3 , height =6 )
 pheatmap(mtx_corr,cluster_rows = F,cluster_cols=T,color=colmat(200),border_color = NA,na_col="red",show_colnames=T)#,add.expr={makeRects(selection)}
 dev.off()
 
-pheatmap(mtx_corr_subsettedbyDEG,cluster_rows = F,cluster_cols=T,color=colmat(200),border_color = NA,na_col="red",show_colnames=T)#,add.expr={makeRects(selection)}
-
-save(DG.combined.markers, file=paste0(getwd(),"/results/LinnarsonDataCorrelation/DG.combined.markers",Sys.Date(),".R"))
-save(pb_DG, file=paste0(getwd(),"/results/LinnarsonDataCorrelation/Linnarson_merged",Sys.Date(),".R"))
 write.csv(mtx_corr,paste0(getwd(),"/results/LinnarsonDataCorrelation/mtx_corr_subsettedbyDEG",Sys.Date(),".csv"))
 
 ```
@@ -1234,7 +1226,8 @@ corplot.modules<-corrplot(cor(as.matrix((AdultDev.combined@meta.data[10:17]))), 
 groups <- AdultDev.combined@meta.data[, c("Group")]
 
 pb_AD <- aggregate.Matrix(as.data.frame(t(AdultDev.combined@assays$integrated@scale.data)), groupings = groups, fun = "sum")
- 
+save(pb_AD, file=paste0(getwd(),"/results/Comapre_NesAdult_Shin.etal2015/Shin_merged",Sys.Date(),".R"))
+
 # n1<-rownames(pb_AD)[grepl("1",rownames(pb_AD))]
 # n2<-rownames(pb_AD)[grep("2",rownames(pb_AD))]
 # n3<-rownames(pb_AD)[grep("3",rownames(pb_AD))]
@@ -1274,10 +1267,7 @@ corplot<-corrplot(cor(as.matrix(t(Subpb_AD))), # Correlation matrix
          title = "",       # Main title
          col =colorRampPalette(c("blue","white","red"))(200),tl.srt = 90, tl.cex = 0.5)  
 
-#save(AdultDev.combined, file=paste0(getwd(),"/results/Comapre_NesAdult_Shin.etal2015/AdultDev.combined",Sys.Date(),".R"))
-#save(pb_AD, file=paste0(getwd(),"/results/Comapre_NesAdult_Shin.etal2015/Shin_merged",Sys.Date(),".R"))
 write.csv(mtx_corr2,paste0(getwd(),"/results/Comapre_NesAdult_Shin.etal2015/mtx_corr2_subsettedbyDEG",Sys.Date(),".csv"))
-
 
 ```
 
