@@ -321,7 +321,7 @@ DimPlot(AdultDev.combined, label = TRUE,group.by =  "Group",reduction = "umap",p
 DimPlot(AdultDev.combined, label = TRUE,group.by =  "Group",reduction = "umap",pt.size = 3,split.by= "orig.ident")+ scale_color_manual(values=c(NewFigureColors,waterfall.colors))
 
 ####### 
-#FIGURE S2G*************************NEED TO VERIFY
+#FIGURE S2G
 #######
 #Correlation plot with Adult NSC trajectory clusters Shin et.al 2015
 corrplot(cor(as.matrix(t(Subpb_AD))),        # Correlation matrix
@@ -354,7 +354,7 @@ annotation_col <- newCols(length(unique(pData(Hopx.m.tj)$FinalCluster_ag)))
 annotation_col<-NewFigureColors[c(1,4,5)]
 annotation_col <- list(FinalCluster_ag = annotation_col,Age=NewAgeColors)
 
-pdf(paste0(getwd(),"/results/plots/GRN_Heatmap.Figure3E.pdf"), height = 6,width = 4) 
+pdf(paste0(getwd(),"/results/plots/GRN_Heatmap.pdf"), height = 6,width = 4) 
 pheatmap( mat[order(apply(t(rollapply(t(mat), width=window, by=step, FUN=mean)), 1, which.max)),rownames(ordercells) ],cluster_rows = FALSE,cluster_cols=FALSE,color=viridis(length(mat_breaks) - 1),border_color = NA,na_col="red",breaks=mat_breaks,show_colnames=F, annotation_col = pData(Hopx.m.tj)[,c("FinalCluster_ag","Age")],annotation_colors = annotation_col,fontsize = 8)
 dev.off()
 
