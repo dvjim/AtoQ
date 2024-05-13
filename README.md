@@ -10,7 +10,7 @@ Quiescent adult neural stem cells (NSCs) in the mammalian brain arise from proli
 [DIO] 
 
 * Code used for the next-generation single-cell RNA sequencing analysis accompanying the manuscript.
-* Raw sequencing data can be found at GEO under the SuperSeries accession GSE232833.
+* Raw sequencing data can be found at GEO under the accession GSE232833.
 ## Highlights
 ***
   * NSC development into an adult state is a multi-step process
