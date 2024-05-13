@@ -1,21 +1,11 @@
-# Sequential Milestones Underlying Hippocampal Neural Stem Cell Development into an Adult State
+# Molecular Cascade Reveals Sequential Milestones Underlying Hippocampal Neural Stem Cell Development into an Adult State 
 ## Table of Contents
 1. [Summary](#summary)
 2. [Highlights](#highlights)
 6. [Methods](#methods)
 ## Summary
 ***
-Quiescent adult neural stem cells (NSCs) in the mammalian brain arise from proliferating NSCs
-during development. It is unknown whether the transition to an adult NSC state is simply a
-switch to quiescence, a hallmark of adult NSCs, or a more complex yet unknown process. Here
-we investigated intrinsic NSC dynamics across early postnatal stages in the mouse dentate
-gyrus at cellular, molecular and metabolic levels. We found that NSCs shift cell cycle dynamics
-to increase occupancy in the G2/M phase before quiescence acquisition. Single-cell RNA-seq
-identified the molecular cascade underlying two phases with the transition to quiescence,
-followed by further NSC maturation. Metabolic analysis further revealed a burst of autophagy
-before quiescence acquisition and elevated cellular ROS levels with NSC maturation. Our study
-demonstrates that NSC development into an adult state is not a singular switch from
-proliferation to quiescence but is a multi-step developmental process with defined milestones.
+Quiescent adult neural stem cells (NSCs) in the mammalian brain arise from proliferating NSCs during development. Beyond acquisition of quiescence, an adult NSC hallmark, little is known about the process, milestones and mechanisms underlying the transition of developmental NSCs to an adult NSC state. Here we performed targeted single-cell RNA-seq analysis to reveal the molecular cascade underlying NSC development in the early postnatal mouse dentate gyrus. We identified two sequential steps, first a transition to quiescence followed by further maturation, each of which involved distinct changes in metabolic gene expression. Direct metabolic analysis uncovered distinct milestones, including an autophagy burst before NSC quiescence acquisition and cellular ROS level elevation along NSC maturation. Functionally, autophagy is important for the NSC transition to quiescence during early postnatal development. Together, our study reveals a multi-step process with defined milestones underlying establishment of the adult NSC pool in the mammalian brain
 
 [DIO] 
 
