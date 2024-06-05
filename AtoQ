@@ -187,7 +187,7 @@ PC2HM<-DimHeatmap(Hopx.s, reduction = "pca", dim = 2, nfeatures=20,fast = FALSE)
 #Identify which cells cell cycle phase per cell
 #A list of cell cycle markers, from Tirosh et al, 2015, is loaded with Seurat.
 #convert human to mouse genes
-#Set by seurat in late 2019 after original analysis with cc.genes
+#Set by seurat in late 2019 
 if (FALSE) {
 cc.genes.updated.2019 <- cc.genes
 cc.genes.updated.2019$s.genes <- UpdateSymbolList(symbols = cc.genes.updated.2019$s.genes)
@@ -209,7 +209,7 @@ print(UMAP_Phase)
 print(UMAP_SCT_snn_res.2)
 print(PCAPlot)
 
-#Split plot by age add for re-viewer comments
+#Split plot by age 
 DimPlot(Hopx.s, reduction = "umap",pt.size = 3,label = TRUE, label.size = 4,ncol = 2,split.by = "Age",group.by = "Phase") + scale_color_manual(values=c("G1"="darkblue","G2M"="red4","S"="red"))
 #Quantification per age of phase distribution
 Prop.cells.per.age.phase<-as.matrix(round(prop.table(table(pData(Hopx.m)$Phase,pData(Hopx.m)$Age))*100,1))
@@ -1375,7 +1375,7 @@ plot_genes_in_PT  (cds=Hopx.m.tj.vz, genelist = genelist, cell_in_order= orderce
 plot_genes_in_pseudotime(Hopx.m.tj.vz[c("Aldoc","Sox9","Nfix","Cst3"),],min_expr = 0,color_by = "FinalCluster_ag",trend_formula = "~ sm.ns(Pseudotime, df=3)")+ scale_color_manual(values = NewFigureColors)+theme(text = element_text(size=11))#For confirmation of plotting
 
 
-#Manually Selected
+#Selected
 RNASplicing<-c("Ddx39b","Ddx46","Snw1","Tra2b","Ik")
 CytoplasmicTrans<-c("Eif3d","Eef2","Eif4a1","Ythdf2","Fmr1","Ftsj1","Aars")
 CellJuncM<-c("Rhoc","Itgav","Cldn10","Gpm6b","Cdh10")
