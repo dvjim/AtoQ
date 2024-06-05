@@ -310,10 +310,6 @@ plot_cell_trajectory(Hopx.m.tj, color_by = "Age",cell_size=3)+ scale_color_manua
 dev.off()
 
 ####### 
-#FIGURE S2D-Created in GraphPad
-#######
-
-####### 
 #FIGURE SE-F
 #######
 waterfall.colors<-c("1"="grey14","2"="slategray4","3"="steelblue","4"="coral3","5"="brown")
@@ -587,8 +583,6 @@ print(HM4)
 print(aluv.Rps3)
 dev.off()
 ```
-
-#FIGURE 4
 ```{r}
 #######
 #FIGURE 4A-B
@@ -741,7 +735,7 @@ eg.MQplotting@compareClusterResult<-BubbleGO
 clusterProfiler::dotplot(eg.MQplotting,showCategory=20,font =6)
 
 #######
-#FIGURE 3C and 3D
+#FIGURE 4C-D
 #######
 Autophagy<-c("Atg5", "Atg12", "Gabarap", "Ulk2")
 CytoplasmicTrans<-c("Eif4a1","Eif3d","Eef2")
@@ -768,7 +762,7 @@ Figure_Genes<-c(RNASplicing,CellJuncM,CellPolarity,Oxidation,Mitochondrial)#
 
 ordercells<-phenodata.all[order(phenodata.all$Pseudotime),]
 
-Figure_Genes<-c(CytoplasmicTrans,Autophagy)#
+Figure_Genes<-c(RNASplicing,CellJuncM,Mitochondrial,Oxidation,CellPolarity)#
 plot_genes_in_PT  (cds=Hopx.m.tj.vz, genelist = rownames(Hopx.m.tj.vz[rownames(Hopx.m.tj.vz) %in% Figure_Genes,]), cell_in_order=ordercells ,min_expr = 0,cell_size = 2,nrow = 6, ncol = 5, panel_order = Figure_Genes, color_by = "FinalCluster_ag",color=NewFigureColors)
 
 ```
