@@ -1,0 +1,826 @@
+#Library of helper functions
+
+
+#Setting new data class for storage of analysis
+setClass("DataCollect",representation (
+  TPM="matrix",
+  SCEobject="SingleCellExperiment",
+  SEURAT= "Seurat",
+  SCENIC="aucellResults",
+  CELLROUTER= "CellRouter",
+  MONOCLE_CLUSTER="CellDataSet",
+  MONOCLE_TRAJECTORY="CellDataSet",
+  TRAJECORY_ANALYSIS="list",
+  CELLID="list",
+  RNAVELOCITY="list",
+  SCORES="data.frame",
+  GRN="list",
+  GRN_UP="list",
+  GRN_DOWN="list",
+  Scores="data.frame",
+  Statistics="list",
+  Directory="list",
+  signatures="list",
+  sources="list")
+)
+
+
+#ggplotColors
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
+
+
+#Manuscript Colors
+NewFigureColors<-c("a1"="#DC050C","a2"="sienna1","a3"="gold1","q1"="deepskyblue2","q2"="blue","ImA"="darkolivegreen2","MA"="mediumpurple")
+NewFigureColors.Orig<-c("1"="#DC050C","2"="deepskyblue2","3"="gold1","4"="darkolivegreen2","5"="sienna1","6"="blue","MA"="mediumpurple")
+NewAgeColors<-c("P3"="#FF00CC","P7"="#9900FF", "P14"= "#0000FF")
+
+#convert Human and mouse genes
+convertMouseGeneList <- function(x){
+  
+  require("biomaRt")
+  human = useMart("ensembl", dataset = "hsapiens_gene_ensembl",host = "dec2021.archive.ensembl.org")
+  mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl",host = "dec2021.archive.ensembl.org")
+  
+  genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = x , mart = mouse, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=T)
+  humanx <- unique(genesV2[, 1])
+  
+  ### Print the first 6 genes found to the screen
+  print(head(humanx))
+  return(humanx)
+}
+
+#WSS from Shin et.al 2015
+wssplot <- function( data, nc=15, seed=1234){
+  wss <- (nrow(data)-1)*sum(apply(data,2,var))
+  for (i in 2:nc){
+    set.seed(seed)
+    wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+  plot(1:nc, wss, type="b", xlab="Number of Clusters",
+       ylab="Within groups sum of squares")}
+
+#Clustree Prep
+ClustreeDF<-function(emb=Hopx.s@reductions$pca@cell.embeddings,mat=Hopx.s@assays$SCT@data){
+tmp <- NULL
+for (k in 1:11){
+  res<-t(as.matrix(mat))
+  tmp[k] <- kmeans((res),k, nstart = 11)
+}
+df <- data.frame(tmp)# add a prefix to the column names
+colnames(df) <- seq(1:11)
+colnames(df) <- paste0("k",colnames(df))# get individual PCA
+
+ind.coord<-emb
+ind.coord <- ind.coord[,1:2]
+df <- bind_cols(as.data.frame(df), as.data.frame(ind.coord))
+clustreeResults<-clustree(df, prefix = "k")
+return(clustreeResults)
+}
+
+#Violin Plot of genes
+ViolinPlot<-function(metadata=Hopx.s@meta.data,matrix= Hopx.s@assays$RNA@data ,id=c("Age","FinalCluster_ag"),filename="comparison",GENES=GENES){
+  data_names<-mget(c("GENES"))
+  
+  ViolinGO.list<-list()
+  for(i in 1:length(data_names)){
+    j<-names(data_names)[i]
+    x<-get(j)
+    for(y in 1:length(x)){
+      
+      ViolinGO<-merge(metadata[,id],t(matrix[rownames(matrix) %in% x,rownames(metadata)]),by=0)
+      rownames(ViolinGO)<-ViolinGO$Row.names
+      ViolinGO<-ViolinGO[,-1]
+    }
+    ViolinGO.list[[i]]<-ViolinGO
+  }
+  names(ViolinGO.list)<-names(data_names)
+  
+  
+  out_list<-list()
+  for(j in 1:length(ViolinGO.list)){
+    local({
+      ViolinGO<-ViolinGO.list[[j]]
+      m<-melt(ViolinGO,id=id)
+      #m<-subset(m,!m$Age == "P7")
+      auxplot <- ggplot(m,aes(x = as.numeric(FinalCluster_ag), y = as.numeric(value), group = FinalCluster_ag)) +
+        geom_violin(aes(fill = factor(FinalCluster_ag)), scale = "width") +
+        #scale_x_discrete(limits=c("a1","a2","a3","q1","q2","ImA","MA")) +
+        scale_fill_manual(values=NewFigureColors) + facet_wrap(~variable,nrow=10,ncol=10)+ggtitle(paste0(names(ViolinGO.list)[j]))+
+        #stat_summary(fun.y=median, geom="point", size=2) +
+        #scale_y_continuous(lim = c(0, 2000)) +
+        #geom_jitter(height = 0) +
+        theme_classic()+ theme(legend.position="none")+theme(text = element_text(size=9))+
+        xlab(filename)+ylab("Expression")+
+        theme(
+          axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(),axis.title.y=element_blank())
+      name<-paste0(names(ViolinGO.list)[j])
+      out_list[[name]] <<-auxplot
+    })
+  }
+  pls<-mget("out_list")
+  pdf(paste0(getwd(),"/results/VlnPlot_",filename,".",Sys.Date(),".pdf"))
+  invisible(lapply(pls,print))
+  dev.off()
+  return(out_list)
+}
+
+#DotPlot
+DotPlot<-function(metadata=Hopx.s@meta.data,markers.to.plot=GENES,seuratobject=Hopx.s,clusters=c("a2","a3","a1","q1","q2","ImA","MA")){
+  cells <- rownames(metadata)
+  features<-markers.to.plot
+  DefaultAssay(seuratobject)<-"RNA"
+  data.features <- FetchData(object = seuratobject, vars = features, cells = cells)
+  Ident<-metadata$FinalCluster_ag
+  names(Ident)<-rownames(metadata)
+  data.features$id<-Ident
+  id.levels <- levels(x = data.features$id)
+  data.features$id <- as.vector(x = data.features$id)
+  PercentAbove <- function(x, threshold) {
+    return(length(x = x[x > threshold]) / length(x = x))}
+  data.plot <- lapply(X = unique(x = data.features$id),FUN = function(ident) {
+    data.use <- data.features[data.features$id == ident, 1:(ncol(x = data.features) - 1), drop = FALSE]
+    avg.exp <- apply(
+      X = data.use,
+      MARGIN = 2,
+      FUN = function(x) {
+        return(mean(x = expm1(x = x)))
+      }
+    )
+    pct.exp <- apply(X = data.use, MARGIN = 2, FUN = PercentAbove, threshold = 0)
+    return(list(avg.exp = avg.exp, pct.exp = pct.exp))
+  })
+  names(x = data.plot) <- unique(x = data.features$id)
+  data.plot <- lapply( X = names(x = data.plot),FUN = function(x) {
+    data.use <- as.data.frame(x = data.plot[[x]])
+    data.use$features.plot <- rownames(x = data.use)
+    data.use$id <- x
+    return(data.use)
+  })
+  data.plot <- do.call(what = 'rbind', args = data.plot)
+  MinMax <- function(data, min, max) {
+    data2 <- data
+    data2[data2 > max] <- max
+    data2[data2 < min] <- min
+    return(data2)
+  }
+  data.plot$avg.exp.log<-log(data.plot$avg.exp)
+  data.plot$pct.exp[data.plot$pct.exp < 0] <- NA
+  data.plot$pct.exp <- data.plot$pct.exp * 100
+  
+  data.plot$id<-factor(data.plot$id, levels=clusters)
+  #data.plot$id<-factor(data.plot$id, levels=data.plot$id[d$order])
+  
+  data.plot<-data.plot[apply(data.plot[,-1], 1, function(x) !all(x==0)),]
+  
+  features<-features[features %in% rownames(seuratobject)]
+  
+  #df <- scale(exprs(Hopx_recluster_ag[features,]))
+  #c <- hclust(dist(df, method='euclidean'), method='ward.D')
+  #c$order
+  
+  #data.plot$features.plot = factor(data.plot$features.plot, levels = data.plot$features.plot[c$order])
+  library(zoo)
+  quantile_range <- quantile(data.plot$avg.exp.log, probs = seq(0, 1, 0.2))
+  #quantile_range <- quantile_breaks(data.plot$avg.exp.log, n = 130)
+  
+  color_palette <- viridis(length(quantile_range) - 1)
+  label_text <- rollapply(round(quantile_range, 2), width = 2, by = 1, FUN = function(i) paste(i, collapse = " : "))
+  data.plot$mod_mat <- matrix(findInterval(data.plot$avg.exp.log, quantile_range, all.inside = TRUE), nrow = nrow(data.plot))
+  
+  data.plot<-data.plot %>% filter(avg.exp > 0, pct.exp > 1)
+  data.plot$features.plot<-factor(data.plot$features.plot, levels=markers.to.plot)
+  
+  g<- ggplot(data = data.plot, mapping = aes_string(x = 'features.plot', y = 'id')) +
+    geom_point(mapping = aes_string(size = 'pct.exp', color = 'mod_mat')) + #pct.exp scale_size(range=c(.1,5))+
+    scale_size_area()+
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +cowplot::theme_cowplot()+
+    theme(axis.line  = element_blank()) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    ylab('') +
+    theme(axis.ticks = element_blank())+
+    guides(size = guide_legend(title = '% Cells'))+
+    scale_color_gradientn(colours = viridis(20),limits=c(0,6),oob = scales::squish, name = 'Expression')+coord_fixed(ratio=1) +coord_flip()#viridis::viridis(20)limits = c(1,4),
+  g
+}
+
+#Plot RNA Velocity result over many genes of interest
+RNAvelocitygenesplot<-function(genelist=genes,emat=emat,nmat=nmat,deltaT=1,kCells = 10,kGenes=1,fit.quantile=fitquantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=i,old.fit=rvel.pca.cell.distance,do.par=T){
+  out_list<-list()
+  for(i in genes)
+    local({
+      i <- i
+      pl<-gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 10,kGenes=1,fit.quantile=fitquantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=i,old.fit=rvel.pca.cell.distance,do.par=T)
+      out_list[[i]] <<- pl
+    })
+  print(out_list)
+  return(out_list)
+}
+
+
+#Manual import data into Cellrouter class
+CellroutertoMonocleImport<-function (matrix= as.matrix(Hopx.s@assays$RNA@data), allcells = colnames(as.matrix(Hopx.m.tj)), sub_cells1=rownames(a.q), sub_cells2= rownames(q.maturation), 
+                                     pseudotime.aq=a.q$Pseudotime,pseudotime.q = q.maturation$Pseudotime, Trajectory1="M.AQ",Trajectory2="M.Q",colname='FinalCluster_ag', metadata='Age',
+                                     phenodata=phenodata.all,cell.colors= NewFigureColors,metadata.color=NewAgeColors,dr.custom= Hopx.s@reductions$umap@cell.embeddings,
+                                     pca=Hopx.s@reductions$pca@cell.embeddings){
+
+dataDev <- as.data.frame(matrix[,allcells])
+object <- CellRouter(rawdata = as.data.frame(dataDev))#, min.cells=0,min.genes=0)
+object <- addInfo(object, metadata =phenodata, colname = colname, metadata.column= colname)
+object <- addInfo(object, metadata = phenodata, colname = metadata, metadata.column= metadata)
+object@ndata<-as.data.frame(matrix)
+
+sampTab <- object@sampTab[order((object@sampTab[[colname]])),]
+levels(sampTab$FinalCluster_ag)
+replicate_row <- as.vector(unlist(lapply(split(sampTab, sampTab[[colname]]), nrow)))
+cell.colors<-cell.colors[levels(factor(sampTab$FinalCluster_ag))]
+colors_row <- rep(cell.colors, replicate_row)
+sampTab[,'colors'] <- colors_row
+object@sampTab<-sampTab
+
+object@pca$cell.embeddings <- pca
+object@dr.custom$cell.embeddings <- dr.custom
+
+cellorder.aq<-sub_cells1
+object@pathsinfo$distr[[Trajectory1]]<-matrix[,cellorder.aq]#Must be in pseudo order for correct correlation 
+object@pathsinfo$path[[Trajectory1]]<-cellorder.aq
+object@pathsinfo$pathInfo[[Trajectory1]]$path<-toString(cellorder.aq)
+object@pathsinfo$pathInfo[[Trajectory1]]$source<-head(cellorder.aq,1)
+object@pathsinfo$pathInfo[[Trajectory1]]$sink<-tail(cellorder.aq,1)
+object@pathsinfo$pathInfo[[Trajectory1]]$cost<- "NA"
+object@pathsinfo$pathInfo[[Trajectory1]]$source_population<- as.vector(a.q[head(cellorder.aq,1),colname])
+object@pathsinfo$pathInfo[[Trajectory1]]$target_population<- as.vector(a.q[tail(cellorder.aq,1),colname])
+path_list.aq<-matrix(nrow=1,ncol=8, c(as.vector(toString(cellorder.aq)),
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$source[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$sink[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$cost[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$source_population[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$target_population[1],
+                                      as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory1]]$source[1],"colors"]),
+                                      as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory1]]$sink[1],"colors"])),dimnames=list(c(Trajectory1),c("path","source","sink","cost","source_population","target_population","source_color","target_color")))
+pseudotime.aq<-a.q$Pseduotime
+names(pseudotime.aq)<-sub_cells1
+object@pathsinfo$pseudotime[[Trajectory1]]<- pseudotime.aq
+object@pathsinfo$pathInfo[[Trajectory1]]$source<-head(cellorder.aq,1)
+data_path.aq<-matrix(nrow=1,ncol=8, c(as.vector(toString(cellorder.aq)),
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$source[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$sink[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$cost[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$source_population[1],
+                                      object@pathsinfo$pathInfo[[Trajectory1]]$target_population[1],
+                                      as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory1]]$source[1],"colors"]),
+                                      as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory1]]$sink[1],"colors"])),dimnames=list(c(Trajectory1),c("path","source","sink","cost","source_population","target_population","source_color","target_color")))  
+object@pathsinfo$path_data<-data_path.aq
+object@pathsinfo$pathInfo[[Trajectory1]]<-path_list.aq
+object@genes.trajectory<-rownames(object@pathsinfo$distr$M.AQ)
+
+
+cellorder.q<-sub_cells2
+object@pathsinfo$distr[[Trajectory2]]<-(matrix[,cellorder.q])#Must be in pseudo order for correct correlation 
+object@pathsinfo$path[[Trajectory2]]<-cellorder.q
+object@pathsinfo$pathInfo[[Trajectory2]]$path<-toString(cellorder.q)
+object@pathsinfo$pathInfo[[Trajectory2]]$source<-head(cellorder.q,1)
+object@pathsinfo$pathInfo[[Trajectory2]]$sink<-tail(cellorder.q,1)
+object@pathsinfo$pathInfo[[Trajectory2]]$cost<- "NA"
+object@pathsinfo$pathInfo[[Trajectory2]]$source_population<- as.vector(q.maturation[head(cellorder.q,1),colname])
+object@pathsinfo$pathInfo[[Trajectory2]]$target_population<- as.vector(q.maturation[tail(cellorder.q,1),colname])
+path_list.q<-matrix(nrow=1,ncol=8, c(as.vector(toString(cellorder.q)),
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$source[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$sink[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$cost[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$source_population[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$target_population[1],
+                                     as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory2]]$source[1],"colors"]),
+                                     as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory2]]$sink[1],"colors"])),dimnames=list(c(Trajectory2),c("path","source","sink","cost","source_population","target_population","source_color","target_color")))
+pseudotime.q<-q.maturation$Pseduotime
+names(pseudotime.q)<-sub_cells2
+object@pathsinfo$pseudotime[[Trajectory2]]<- pseudotime.q
+object@pathsinfo$pathInfo[[Trajectory2]]$source<-head(cellorder.q,1)
+data_path.q<-matrix(nrow=1,ncol=8, c(as.vector(toString(cellorder.q)),
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$source[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$sink[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$cost[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$source_population[1],
+                                     object@pathsinfo$pathInfo[[Trajectory2]]$target_population[1],
+                                     as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory2]]$source[1],"colors"]),
+                                     as.vector(object@sampTab[object@pathsinfo$pathInfo[[Trajectory2]]$sink[1],"colors"])),dimnames=list(c(Trajectory2),c("path","source","sink","cost","source_population","target_population","source_color","target_color")))  
+object@pathsinfo$path_data<-data_path.q
+object@pathsinfo$pathInfo[[Trajectory2]]<-path_list.q
+object@genes.trajectory<-rownames(object@pathsinfo$distr[[Trajectory2]])
+return(object)
+}
+
+
+
+
+#quantilbreaks for heatmap
+quantile_breaks <- function(xs, n = 200) {
+  breaks <- quantile(xs, probs = seq(0, 1, length.out = n))
+  breaks[!duplicated(breaks)]
+}
+
+#Identify targets for predicted GRN (CellRouter) and plot per TF
+GRNTargetHeatmap<-function(grn.scores.up=grn.scores.up,grn.scores.down=grn.scores.down,matrix=cellrouterMain@ndata,pd=pData(Hopx.m.tj.vz), cells=cellrouterMain@pathsinfo$path,cor=0.4,id= c("FinalCluster_ag","Age"),TF=NULL,
+                           colname.col=NewFigureColors,metadata.col=NewAgeColors,cellrouterMain=cellrouterMain,Trajectories=c("M.AQ","M.Q"),fontsize=6,num_of_exgenes=5,seed=123)
+{
+  
+  colname= id[1]
+  metadata= id[2]
+  plot_list<-vector(mode = "list", length = length(Trajectories))
+  names(plot_list)<-Trajectories
+  matrix.used.for.plotting<-vector(mode = "list", length = length(Trajectories))
+  names(matrix.used.for.plotting)<-Trajectories
+  
+  for (tj in Trajectories){
+    library(dplyr)
+    library(data.table)
+    
+    #save name in loop
+    #Version1 
+    nam1 <- paste("TF.UP",tj, sep = ".")
+    assign(nam1, subset(grn.scores.up[[tj]]$scores,grn.scores.up[[tj]]$scores > 0)) #TF going up causing Targets go UP
+    #assign(nam1, grn.scores.up[[tj]]$scores) 
+    
+    
+    nam2 <- paste("TF.DOWN",tj, sep = ".")
+    assign(nam2,subset(grn.scores.down[[tj]]$scores,grn.scores.down[[tj]]$scores < -0))#TF going down causing Targets to go DOWN
+    #assign(nam2,grn.scores.down[[tj]]$scores)
+    
+    # #Version2 
+    # nam1 <- paste("TF.UP",tj, sep = ".")
+    # assign(nam1,grn.scores.up[[tj]]$scores)
+    # 
+    # nam2 <- paste("TF.DOWN",tj, sep = ".")
+    # assign(nam2,grn.scores.down[[tj]]$scores)
+    # 
+  }
+    
+  for (tj in Trajectories){
+    TFlist<-list(TF.UP.M.AQ,TF.DOWN.M.AQ,TF.UP.M.Q,TF.DOWN.M.Q)
+    names(TFlist)<-c("TF.UP.M.AQ","TF.DOWN.M.AQ","TF.UP.M.Q","TF.DOWN.M.Q")
+    
+    selected.list.up<-TFlist[grepl(tj,names(TFlist))][[1]]  
+    selected.list.down<-TFlist[grepl(tj,names(TFlist))][[2]]  
+    
+    
+    TF.matrix.down<-list()
+    TF.matrix.up<-list()
+    library(dplyr)
+    
+    for (i in 1:length(selected.list.up)){
+      i<-noquote(i)
+      TF.matrix.g.up<-as.data.frame(table(grn.scores.up[[tj]]$targets[[i]],dnn= list("genenames")),responseName="genetypes")
+      TF.matrix.g.up$genetypes<- paste0( names(selected.list.up[i])," ","targets")
+      rownames(TF.matrix.g.up)<-TF.matrix.g.up$genenames
+      #TF.matrix.up<-rbind(TF.matrix.g,TF.matrix.up)
+      degup<-subset(names(cellrouterMain@top.correlations$up[[tj]]),cellrouterMain@top.correlations$up[[tj]] > abs(cor))
+      exampleTF.targets.up<-as.data.frame(subset(degup,degup %in% unique(TF.matrix.g.up$genenames)))
+      colnames(exampleTF.targets.up)<- "genenames"
+      anno.up<-merge(exampleTF.targets.up,TF.matrix.g.up,by="genenames")
+      TF.matrix.up<- bind_rows(anno.up,TF.matrix.up)
+      TF.matrix.up$Direction_of_Target<-"up"
+      TF.matrix.up$Trajectory<-tj
+    }
+    
+    
+    for (j in 1:length(selected.list.down)){
+      j<-noquote(j)
+      TF.matrix.g.down<-as.data.frame(table(grn.scores.down[[tj]]$targets[[j]],dnn= list("genenames")),responseName="genetypes")
+      TF.matrix.g.down$genetypes<- paste0(names(selected.list.down[j])," ","targets")
+      rownames(TF.matrix.g.down)<-TF.matrix.g.down$genenames
+      #TF.matrix.down<-rbind(TF.matrix.g.down,TF.matrix.down)
+      degdown<-subset(names(cellrouterMain@top.correlations$down[[tj]]),cellrouterMain@top.correlations$down[[tj]] < -(cor))
+      exampleTF.targets.down<-as.data.frame(subset(degdown,degdown %in% unique(TF.matrix.g.down$genenames)))
+      colnames(exampleTF.targets.down)<- "genenames"
+      anno.down<-merge(exampleTF.targets.down,TF.matrix.g.down,by="genenames")
+      TF.matrix.down<-bind_rows(anno.down,TF.matrix.down)
+      TF.matrix.down$Direction_of_Target<-"down"
+      TF.matrix.down$Trajectory<-tj
+      
+    }
+    
+    nam4 <- paste(tj,"tf.matrix", sep = ".")
+    assign(nam4,rbind(TF.matrix.down,TF.matrix.up))
+    
+    matrix.used.for.plotting[tj] <-mget(paste(tj,"tf.matrix", sep = "."))
+    
+    
+    tf_matrix<-rbind(TF.matrix.down,TF.matrix.up)
+    
+    tf_matrix<-data.table(tf_matrix, key="genetypes")
+    tf_matrix<-tf_matrix[, head(.SD, 100), by=genetypes]
+    tf_matrix<-setDT(tf_matrix)[, if (.N >2) .SD, by = genetypes] #3
+    
+    require(pheatmap)
+    require(viridis)
+    require(cowplot)
+    require(ggplot2)
+    require(ggplotify)
+    if(!is.null(TF)){
+      row_anno<-tf_matrix[grepl(paste0(TF," ", "targets"),tf_matrix$genetypes),]
+      rownames(row_anno)<-tf_matrix[grepl(paste0(TF," ", "targets"),tf_matrix$genetypes),]$genenames
+      row_anno<-row_anno[!duplicated(row_anno$genenames), ]# this is only for visualization, the same genename can be shown for multiple TFs
+      
+      row_anno<-  as.data.frame(do.call(cbind, row_anno))
+      rownames(row_anno)<-row_anno$genenames
+      row_anno<-row_anno[,c("genetypes","Direction_of_Target")]
+      
+      mat1_TF<-as.matrix(matrix[rownames(row_anno),])#presents only selected TF
+      #mat1_TF<-mat1_TF[order(apply(t(rollapply(t(mat1_TF), width=window, by=step, FUN=mean)), 1, which.max)), ]
+      mat_breaks_TF <- quantile_breaks(mat1_TF, n = 200)
+      
+      ordercells<- pd[order(pd$Pseudotime, decreasing = F), ]
+      ordercells_1<-subset(ordercells,rownames(ordercells) %in% cells[[tj]])
+      #ordercells_a<-subset(ordercells,rownames(ordercells) %in% cells[[Trajectories[1]]])
+      #ordercells_b<-subset(ordercells,rownames(ordercells) %in% cells[[Trajectories[2]]])
+      
+      genetype_col_TF<-rainbow(length(unique(row_anno$genetypes)))
+      names(genetype_col_TF) <- unique(row_anno$genetypes)
+      annotation_col_TF<-list(colname=colname.col,metadata=metadata.col,Direction_of_Target= c("down"="blue","up"="red"),genetypes=genetype_col_TF)
+      names(annotation_col_TF)[1:2]<-id
+      
+      
+      pdf(paste0(getwd(),'/results/CellRouter/',TF,".",tj,'.TFtargetHeatmap_',Sys.Date(),'.pdf'),width =10, height = 5)
+      
+      TF.not.found.in.trajectory <- FALSE
+      tryCatch(
+        {
+          HM3<-pheatmap(mat1_TF[rownames(row_anno),rownames(ordercells_1)],main = paste0(tj," ",TF," targets"),
+                        cluster_rows = F,cluster_cols=FALSE,color=viridis(length(mat_breaks_TF) - 1),
+                        border_color = NA,na_col="red",breaks=mat_breaks_TF,show_colnames=F,annotation_col =pd[rownames(ordercells_1),id],
+                        annotation_row =row_anno,annotation_colors = annotation_col_TF,fontsize = fontsize);print(HM3)
+        },error = function(e){TF.not.found.in.trajectory <<- TRUE}
+      )
+      print(TF.not.found.in.trajectory)      
+
+      dev.off()
+      
+      
+    } }else{ 
+      
+      set.seed(seed)
+      tf_matrix<- rbind(TF.matrix.down,TF.matrix.up)
+      tf_matrix<- data.table(tf_matrix, key="genetypes")
+      tf_matrix<- tf_matrix %>% group_by(genetypes) %>% slice_sample(n=30)# Set more so dedup won't leave few examples for some TF
+      #tf_matrix<- tf_matrix[!duplicated(tf_matrix$genenames), ]# this is only for visualization, the same genename can be shown for multiple TFs
+      #tf_matrix<- setDT(tf_matrix)[, if (.N >4) .SD, by = genetypes]#3
+      #tf_matrix<- tf_matrix[, head(.SD, num_of_exgenes), by=genetypes]
+      tf_matrix<-setorder(setDT(tf_matrix), -genenames )[, head(.SD, num_of_exgenes), keyby = genetypes]# Collect only 5 example
+      tf_matrix<- as.data.frame(tf_matrix)
+      #rownames(tf_matrix)<-tf_matrix$genenames
+      
+      row_anno<-  as.data.frame(do.call(cbind, tf_matrix))
+      row_anno<-row_anno[!duplicated(row_anno$genenames), ]
+      rownames(row_anno)<-row_anno$genenames
+      row_anno<-row_anno[,c("genetypes","Direction_of_Target")]
+      
+      genetype_col<-rainbow(length(unique(tf_matrix$genetypes)))
+      names(genetype_col) <- unique(tf_matrix$genetypes)
+      annotation_col<-list(colname= colname.col,metadata=metadata.col,Direction_of_Target= c("down"="blue","up"="red"),genetypes=genetype_col)
+      names(annotation_col)[1:2]<-id
+      #
+      genetype_col_all<-rainbow(length(unique(row_anno$genetypes)))
+      names(genetype_col_all) <- unique(row_anno$genetypes)
+      annotation_col_all<-list(colname= colname.col,metadata=metadata.col,Direction_of_Target= c("down"="blue","up"="red"),genetypes=genetype_col_all)
+      names(annotation_col_all)[1:2]<-id
+      #gaps_row = na.omit(indx1 -1)
+      #gaps_row = na.omit(indx2 -1)
+      
+      mat1_all<-as.matrix(matrix[na.omit(tf_matrix$genenames),])#presents all TF
+      mat_breaks_all <- quantile_breaks(mat1_all, n = 200)
+      
+      ordercells<- pd[order(pd$Pseudotime, decreasing = F), ]
+      ordercells_1<-subset(ordercells,rownames(ordercells) %in% cells[[tj]])
+      
+      indx<-c()
+      for (i in unique(tf_matrix$genetypes)){
+        idx<-grep(i, tf_matrix$genetypes)[1]
+        indx<-c(indx,idx)}
+      #This will plot genes that may show up as targets for multiple TFs. Color of genetypes will correspond to the TF grouping that occured first
+      HM_1<-as.grob(pheatmap(mat1_all[tf_matrix$genenames,rownames(ordercells_1)],main = paste0(tj,"Max.N=",num_of_exgenes," All TF & subset of targets"),cluster_rows = F,
+                             cluster_cols=FALSE,color=viridis(length(mat_breaks_all) - 1),
+                             border_color = NA,na_col="red",breaks=mat_breaks_all,show_colnames=F,annotation_col =pd[rownames(ordercells_1),id],
+                             annotation_row =tf_matrix[,c("genetypes","Direction_of_Target","Trajectory")],annotation_colors = annotation_col,fontsize = 4.5,gaps_row = na.omit(indx -1)))#,add.expr={makeRects(selection)}
+      
+      indx2<-c()
+      for (i in unique(row_anno$genetypes)){
+        idx<-grep(i, row_anno$genetypes)[1]
+        indx2<-c(indx2,idx)}
+      #Finds only Targets with unique TFs
+      HM_2<-as.grob(pheatmap(mat1_all[rownames(row_anno),rownames(ordercells_1)],main = paste0(tj,"Max.N=",num_of_exgenes," All TF & subset of targets"),cluster_rows = F,
+                             cluster_cols=FALSE,color=viridis(length(mat_breaks_all) - 1),
+                             border_color = NA,na_col="red",breaks=mat_breaks_all,show_colnames=F,annotation_col =pd[rownames(ordercells_1),id],
+                             annotation_row =row_anno,annotation_colors = annotation_col_all,fontsize = 6,gaps_row = na.omit(indx2 -1)))#,add.expr={makeRects(selection)}
+      TFHeatmap<-plot_grid(HM_1,HM_2)
+      
+      #Save plots
+      ggsave(TFHeatmap, file=paste0(getwd(),'/results/CellRouter/',tj,"Max.N=",num_of_exgenes,'_AllTF_targets_Heatmap',Sys.Date(),'.pdf'), width = 40, height = 40, units = "cm")
+      print(TFHeatmap)
+    }
+  }
+  
+  sapply(names(matrix.used.for.plotting), 
+         function (x) write.csv(matrix.used.for.plotting[[x]], paste0(getwd(),"/results/CellRouter/",names(matrix.used.for.plotting[x]),".TFWorksheet",Sys.Date(),".csv") ))   
+  return(matrix.used.for.plotting)
+}
+
+
+#Trajectory Analysis
+#This pseudotime should have the pseudotime from SCT but will show RNAdata Expressions
+FullTrajectoryAnalysis=function( cds= Hopx.m.tj.vz, cells1 = rownames(a.q),cells2= rownames(q.maturation),FDR=0.05,num=4,k.m=4,Trajectory1="A1_Q1", Trajectory2="Q1-Q2",aqMat.genes= aqMat.genes,qMat.genes=qMat.genes )
+{  
+  
+  print("Making Heatmap with DEG across Pseudotime")
+  
+  
+  #diff_test_res.aq <- differentialGeneTest(Hopx.m.tj.vz[aqMat.genes,],fullModelFormulaStr = "~sm.ns(Pseudotime)")
+  #sig_gene_names.aq <- row.names(subset(  diff_test_res.aq, qval < 0.2))
+  #diff_test_res.q <- differentialGeneTest(Hopx.m.tj.vz[qMat.genes,],fullModelFormulaStr = "~sm.ns(Pseudotime)")
+  #sig_gene_names.q <- row.names(subset(diff_test_res.q, qval < 0.2))
+  
+
+  par(mfrow=c(1, 2))
+  pdf(paste0(getwd(),"/results/Trajectory_results/Heatmap_DEG",Sys.Date(),".pdf"), height = 10,width = 20) 
+  
+  Monocle.HM.a.q.CR.traj_vz.aqmatcells<-plot_pseudotime_heatmap(cds[aqMat.genes ,cells1],
+                                                               num_clusters = k.m,
+                                                               cores = 2,show_rownames = F,return_heatmap = F)#, add_annotation_col = Anno1) #+scale_color_manual(values= Age_colors)
+
+
+  # Monocle.HM.a.q.CR.traj_vz.aqmatcells<-plot_pseudotime_heatmap(cds[sig_gene_names.aq ,cells1],
+  #                                                               num_clusters = k.m,
+  #                                                               cores = 2,show_rownames = F,return_heatmap = T)#, add_annotation_col = Anno1) #+scale_color_manual(values= Age_colors)
+  # 
+  Monocle.HM.a.q.CR.traj_vz.qmatcells<-plot_pseudotime_heatmap( cds[qMat.genes ,cells2],
+                                                               num_clusters = k.m,
+                                                               cores = 2,
+                                                               show_rownames = F,return_heatmap = F)#, add_annotation_col = Anno2) #+scale_color_manual(values= Age_colors)
+
+  # Monocle.HM.a.q.CR.traj_vz.qmatcells<-plot_pseudotime_heatmap( cds[sig_gene_names.q ,cells2],
+  #                                                               num_clusters = k.m,
+  #                                                               cores = 2,
+  #                                                               show_rownames = F,return_heatmap = T)#, add_annotation_col = Anno2) #+scale_color_manual(values= Age_colors)
+  # 
+  #print(Monocle.HM.a.q.CR.traj_vz.aqmatcells)
+  #print(Monocle.HM.a.q.CR.traj_vz.qmatcells)
+  cowplot::plot_grid(as.grob(Monocle.HM.a.q.CR.traj_vz.aqmatcells),as.grob(Monocle.HM.a.q.CR.traj_vz.qmatcells),ncol=4,nrow=2)
+  dev.off()
+  dev.off()
+  dev.off()
+  dev.off()
+  
+  save(Monocle.HM.a.q.CR.traj_vz.aqmatcells, file=paste0(getwd(),"/results/Trajectory_results/Monocle.HM.a.q.CR.traj_vz.aqmatcells_",Sys.Date(),".R"))
+  save(Monocle.HM.a.q.CR.traj_vz.qmatcells, file=paste0(getwd(),"/results/Trajectory_results/Monocle.HM.a.q.CR.traj_vz.qmatcells_",Sys.Date(),".R"))
+  
+  t2 <- as.data.frame(cutree(Monocle.HM.a.q.CR.traj_vz.aqmatcells$tree_row, k=4))
+  colnames(t2) <- "Cluster"
+  t2$Gene <- rownames(t2)
+  
+  Cluster_genes_list_2<-list()
+  for(x in unique(t2$Cluster)){ 
+    clust<-subset(t2,t2$Cluster == x)
+    Cluster_genes_list_2[[x]]<-clust
+  }
+  names(Cluster_genes_list_2)<-unique(t2$Cluster)
+  
+  t3 <- as.data.frame(cutree(Monocle.HM.a.q.CR.traj_vz.qmatcells$tree_row, k=4))
+  colnames(t3) <- "Cluster"
+  t3$Gene <- rownames(t3)
+  
+  Cluster_genes_list_3<-list()
+  for(x in unique(t3$Cluster)){ 
+    clust<-subset(t3,t3$Cluster == x)
+    Cluster_genes_list_3[[x]]<-clust
+  }
+  names(Cluster_genes_list_3)<-unique(t3$Cluster)
+  
+  print("Found gene Clusters and converting to entrezID")
+  #geneNames <- lapply(Cluster_genes_list_2, function(x){setdiff(x$Gene, genesV2$MGI.symbol)}) #remove a selected cell cycle gene set
+  geneList2 <- lapply(Cluster_genes_list_2, function(x){convertIDs(ids, x$Gene, from='external_gene_name', to="entrezgene")})
+  geneList2 <- lapply(geneList2, function(x){convertIDs(ids, x, from='external_gene_name', to="entrezgene")})
+  geneList2 <- lapply(geneList2, names)
+  geneList_AllgenesHM_2 <- lapply(geneList2, function(x){x[!is.na(x)]})
+  names(geneList_AllgenesHM_2)<-c(seq(1:4))
+  #saveRDS(geneList_AllgenesHM_2,paste0("geneList_AllgenesHM_Tj2",Sys.Date(),".RDS"))  
+  save(geneList_AllgenesHM_2, file=paste0(getwd(),"/results/Trajectory_results/geneList_AllgenesHM_2",Sys.Date(),".R"))
+  
+  #geneNames <- lapply(Cluster_genes_list_3, function(x){setdiff(x$Gene, genesV2$MGI.symbol)}) #remove a selected cell cycle gene set
+  geneList3 <- lapply(Cluster_genes_list_3, function(x){convertIDs(ids, x$Gene, from='external_gene_name', to="entrezgene")})
+  geneList3 <- lapply(geneList3, function(x){convertIDs(ids, x, from='external_gene_name', to="entrezgene")})
+  geneList3 <- lapply(geneList3, names)
+  geneList_AllgenesHM_3 <- lapply(geneList3, function(x){x[!is.na(x)]})
+  names(geneList_AllgenesHM_3)<-c(seq(1:4))
+  #saveRDS(geneList_AllgenesHM_3,paste0("geneList_AllgenesHM_Tj3",Sys.Date(),".RDS"))  
+  save(geneList_AllgenesHM_3, file=paste0(getwd(),"/results/Trajectory_results/geneList_AllgenesHM_3",Sys.Date(),".R"))
+  
+  
+  
+ library(data.table)
+  df.2 <-rbindlist(lapply(1:length(geneList2), function(x){ setDT(as.data.frame(geneList2[[x]]),keep.rownames=TRUE)[ , id:=names(geneList2[x])] } ), use.names=TRUE, fill=TRUE)
+  df.3 <-rbindlist(lapply(1:length(geneList3), function(x){ setDT(as.data.frame(geneList3[[x]]),keep.rownames=TRUE)[ , id:=names(geneList3[x])] } ), use.names=TRUE, fill=TRUE)
+  
+  write.csv(df.2,file = paste0(getwd(),"/results/Trajectory_results/",length(geneList2$`1`),"_",length(geneList2$`2`),"_",length(geneList2$`3`),"_",length(geneList2$`4`),"genes_","KineticGeneClusterPattern_Trajectory1",Sys.Date(),".csv"))
+  write.csv(df.3,file = paste0(getwd(),"/results/Trajectory_results/",length(geneList3$`1`),"_",length(geneList3$`2`),"_",length(geneList3$`3`),"_",length(geneList3$`4`),"genes_","KineticGeneClusterPattern_Trajectory2",Sys.Date(),".csv"))
+  
+ library(clusterProfiler)
+ library(org.Mm.eg.db)
+  print("Starting...Compare Gene Clusters with ClusterProfiler and Simplify terms..at 0.7")
+  eg.MAQ <- compareCluster(geneCluster = geneList_AllgenesHM_2, fun = "enrichGO", ont='BP', OrgDb=org.Mm.eg.db, pvalueCutoff = FDR, readable=T)
+  eg.MQ <- compareCluster(geneCluster = geneList_AllgenesHM_3, fun = "enrichGO", ont='BP', OrgDb=org.Mm.eg.db, pvalueCutoff = FDR, readable=T)
+  
+  #FindUnique processes per cluster
+  # readinteger <- function()
+  # { 
+  #   n <- readline( prompt= "Enter any qvalue c(0.05,0.1 or 0.2):")
+  #   n <- as.numeric(n)
+  #   if (is.na(n)){
+  #     n <- readinteger()
+  #   }
+  #   return(n)
+  # }
+  # qvar<-readinteger()
+  
+  
+  ckMAQ_cellrouter.2<-eg.MAQ
+  ckMAQ_cellrouter.2@compareClusterResult<- ckMAQ_cellrouter.2[ckMAQ_cellrouter.2@compareClusterResult$qvalue<=0.1,] #or 0.05
+  ckMAQ_cellrouter.3<-eg.MQ
+  ckMAQ_cellrouter.3@compareClusterResult<- ckMAQ_cellrouter.3[ckMAQ_cellrouter.3@compareClusterResult$qvalue<=0.1,]  #or 0.05
+  
+  # readinteger <- function()
+  # { 
+  #   n <-readline( prompt= "Enter any Redundancy close 1 = more terms, < 1 is simplification:")
+  #   n <- as.numeric(n)
+  #   if (is.na(n)){
+  #     n <- readinteger()
+  #   }
+  #   return(n)
+  # }
+  # rvar<-readinteger()
+ 
+  rvar=0.7
+  num=4
+  ckMAQ_cellrouter.2.Simp <-clusterProfiler::simplify(ckMAQ_cellrouter.2, cutoff=rvar, by="pvalue", select_fun=min)
+  ckMAQ_cellrouter.2.Simp@compareClusterResult<- ckMAQ_cellrouter.2.Simp[ckMAQ_cellrouter.2.Simp@compareClusterResult$Count>num,]
+  ckMAQ_cellrouter.2.Simp@compareClusterResult<-ckMAQ_cellrouter.2.Simp@compareClusterResult[order(ckMAQ_cellrouter.2.Simp@compareClusterResult$qvalue,ckMAQ_cellrouter.2.Simp@compareClusterResult$Count ), ] 
+  #clusterProfiler::dotplot(ckMAQ_cellrouter.2.Simp, showCategory=30) + ggtitle(paste0("PathwayEnrichment_Simplified",Trajectory1))
+  
+  
+  ckMAQ_cellrouter.3.Simp <-clusterProfiler::simplify(ckMAQ_cellrouter.3, cutoff=rvar, by="pvalue", select_fun=min)
+  ckMAQ_cellrouter.3.Simp@compareClusterResult<- ckMAQ_cellrouter.3.Simp[ckMAQ_cellrouter.2.Simp@compareClusterResult$Count>num,]
+  ckMAQ_cellrouter.3.Simp@compareClusterResult<-ckMAQ_cellrouter.3.Simp@compareClusterResult[order(ckMAQ_cellrouter.2.Simp@compareClusterResult$qvalue,ckMAQ_cellrouter.2.Simp@compareClusterResult$Count ), ] 
+  #clusterProfiler::dotplot(ckMAQ_cellrouter.2.Simp, showCategory=30) + ggtitle(paste0("PathwayEnrichment_Simplified",Trajectory2))
+  print("GO done... saving file... Plotting GO Terms ")
+  
+  par(mfrow=c(1, 2))
+  pdf(paste0(getwd(),"/results/Trajectory_results/PathwayEnrichmentSimplified",Sys.Date(),".pdf"), height = 10,width = 20) 
+  c1<-clusterProfiler::dotplot(ckMAQ_cellrouter.2.Simp, showCategory=30,font.size=8) + ggtitle(paste0("PathwayEnrichment_Simplified",Trajectory1))
+  c2<-clusterProfiler::dotplot(ckMAQ_cellrouter.3.Simp, showCategory=30,font.size=8) + ggtitle(paste0("PathwayEnrichment_Simplified",Trajectory2))
+  p1<-cowplot::plot_grid(c1,c2)
+  print(p1)
+  dev.off()
+  
+  write.csv(ckMAQ_cellrouter.2.Simp@compareClusterResult,paste(getwd(),"/results/Trajectory_results/GeneClusters_Kenetics_GO_Tj1",Trajectory1,"_",Sys.Date(),".csv",sep=""))                 
+  write.csv(ckMAQ_cellrouter.3.Simp@compareClusterResult,paste(getwd(),"/results/Trajectory_results/GeneClusters_Kenetics_GO_Tj2",Trajectory2,"_",Sys.Date(),".csv",sep=""))                 
+  
+
+  # #Find Unique processes per cluster
+  # qvalueCutoff<-0.05
+  # eg.MAQ@compareClusterResult<- eg.MAQ[eg.MAQ@compareClusterResult$qvalue<=qvalueCutoff,] 
+  # eg.MAQ@compareClusterResult<- eg.MAQ[eg.MAQ@compareClusterResult$Count>5,]
+  # eg.MAQ.Simp <-clusterProfiler::simplify(eg.MAQ, cutoff=0.7, by="pvalue", select_fun=min)
+  # 
+  
+cklist<-list(ckMAQ_cellrouter.2.Simp@compareClusterResult,ckMAQ_cellrouter.3.Simp@compareClusterResult)
+
+newList <- list(Trajectory= list(Trajectory1,Trajectory2), 
+                "cell.used" = list("Trajectory1"=cells1,"Trajectory2"=cells2),
+                "sig.genes"=list("Trajectory1"=aqMat.genes,"Trajectory2"=qMat.genes),
+                "Heatmap_DEG"=list("Trajectory1"=Monocle.HM.a.q.CR.traj_vz.aqmatcells,"Trajectory2"= Monocle.HM.a.q.CR.traj_vz.qmatcells),
+                "GOSimplified_Terms"= list("Trajectory1"=ckMAQ_cellrouter.2.Simp@compareClusterResult,"Trajectory2"=ckMAQ_cellrouter.3.Simp@compareClusterResult),
+                "Directory"=getwd(), 
+                "FullGOAnlaysis"=list("Trajectory1"=eg.MAQ,"Trajectory2"=eg.MQ),
+                "KineticClusters"=list("Trajectory1"= Cluster_genes_list_2,"Trajectory2"=Cluster_genes_list_3))
+return(newList)
+print(Monocle.HM.a.q.CR.traj_vz.aqmatcells)
+print(Monocle.HM.a.q.CR.traj_vz.qmatcells)
+print(p1)
+}
+
+#Monocle_theme_plotting
+monocle_theme_opts <- function(x){
+  theme(strip.background = element_rect(colour = 'white', fill = 'white')) +
+    theme(panel.border = element_blank()) +
+    theme(axis.line.x = element_line(size=0.25, color="black")) +
+    theme(axis.line.y = element_line(size=0.25, color="black")) +
+    theme(panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank()) +
+    theme(panel.grid.major.x = element_blank(),
+          panel.grid.major.y = element_blank()) +
+    theme(panel.background = element_rect(fill='white')) +
+    theme(legend.key=element_blank())}
+
+#Pseudotime plot of genes
+plot_genes_in_PT<-function( cds=Hopx.m.tj.vz,cell_in_order= ordercells,min_expr = 0.01,cell_size = 2,nrow = NULL, ncol = 1, panel_order = gene.order,genelist=genelist ,color_by = "FinalCluster_ag",color=NewFigureColors){
+  
+  results<-plot_genes_in_pseudotime(cds[genelist,rownames(cell_in_order)], min_expr = min_expr,cell_size = cell_size,nrow = nrow, ncol = ncol, panel_order = panel_order, color_by = color_by)+ scale_color_manual(values= color)
+
+library(ggplot2)
+library(directlabels)
+
+  g1<- ggplot(results$data, aes(x=Pseudotime, y=expression, group=feature_label, colour=feature_label))
+  g1<- g1+ geom_point(aes_string(color=color_by))
+  g1<- g1+ geom_line(aes(x = Pseudotime, y = expectation), data = results$data,size=1)
+  g1<- g1+ scale_color_manual(values=c(color)) 
+  g1<- g1+ facet_wrap(~feature_label,scales="free_y",nrow=nrow) +labs(x="Pseudotime", y="Relative Expression")+ monocle_theme_opts()
+  #g1<- g1+ expand_limits(y = c(0.001, 1))
+  #g1<- g1+ stat_summary(fun.data = "mean_cl_boot",size = 0.2)  
+  #g1<- g1+ scale_y_log10()+
+  print(g1)
+}
+
+#Independent plot of monocle input
+PT_of_genes<-function(cds.metadata=pData(Hopx.m.tj.vz),cds= Hopx.m.tj.vz,genelist=genelist,nrow=2){
+indexorder<-order(cds.metadata[,c("Pseudotime")])
+cellorder<-rownames(cds.metadata[indexorder,]) 
+
+plots <- list()
+library(scales)
+x_axis <- 1:length(cds.metadata$Pseudotime) #trajectory
+for(gene_id in genelist){
+  y_axis <- as.numeric(as.matrix(exprs(cds[gene_id,cellorder])))
+  lo <- loess(y_axis~x_axis)
+  xl <- seq(min(x_axis),max(x_axis), (max(x_axis) - min(x_axis))/50)
+  y_axis <- predict(lo,xl)
+
+  df <- data.frame(cells=1:length(y_axis), Expression=as.numeric(y_axis))
+  df$gene <- gene_id
+  df$cells <- factor(df$cells, levels=df$cells)
+  #num_subpops <- length(unique(df$population))
+  plots[[gene_id]] <- df
+}
+tables <- do.call(rbind, plots)
+labels <- x <- sapply(strsplit(as.vector(tables$gene), split='__', fixed=TRUE), function(x){x[1]})
+tables$gene <- labels
+#tables$Expression <- rescale(tables$Expression, newrange = c(0,1))
+g1 <- ggplot(tables, aes(x=cells, y=Expression, group=gene, colour=gene)) 
+#g1<- g1+ geom_point()#aes_string(color=color_by)
+g1<- g1+ geom_line(aes(x = cells, y = Expression), data = tables,size=1)
+g1<- g1+ scale_color_manual("", values=rainbow(length(genelist)))
+g1<- g1+ facet_wrap(~gene,scales="free_y",nrow=nrow) +labs(x=paste0("Pseudotime"), y="Relative Expression")+ monocle_theme_opts()
+  # g1+ theme_bw() + geom_line(size=1) + #xlab(tj) +
+  # guides(col=guide_legend(direction="vertical")) + #, nrow = 2
+  # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  #       axis.text.x=element_blank(), axis.ticks=element_blank(),
+  #       legend.position = "right",
+  #       panel.border = element_blank()) +
+  # theme(axis.line.x = element_line(color="black", size = 0.5),
+  #       axis.line.y = element_line(color="black", size = 0.5))+
+  # scale_color_manual("", values=rainbow(length(genelist)))
+  ##scale_color_brewer("", palette = 'Set1')
+print(g1)
+}
+
+#Find Network, slighly modified code from CellRouter
+CellRouterNetwork<-function(object=cellrouterMain,ggrn=grn.data$GRN,grn.scores.up=grn.scores.up,grn.scores.down=grn.scores.down){
+  nets <- list()
+  nets2 <- list()
+  for(t in names(grn.scores.up)){
+    for(n in genelist){
+      genes <- c(grn.scores.up[[t]]$targets[[n]],grn.scores.down[[t]]$targets[[n]])
+      if(length(genes) > 0){
+        genes <- c(n, genes)
+        rgrn <- igraph::induced.subgraph(ggrn,
+                                         vids=unlist(igraph::neighborhood(graph=ggrn,order=0,
+                                                                          nodes=genes)))
+        remove <- V(rgrn)$name[igraph::degree(rgrn)==0]
+        rgrn <- igraph::delete.vertices(rgrn, remove)
+        V(rgrn)$color <- na.omit(object@correlation[[t]][V(rgrn)$name])
+        V(rgrn)$size <- log(igraph::degree(rgrn)+1)
+        #rgrn<-as.data.frame(rgrn)
+        
+        g <- fortify(rgrn)
+        g$network <- n
+        g$transition <- t
+        name <- paste(t,n,sep='_')
+        nets2[[name]] <- rgrn
+        nets[[name]] <- g
+      }
+    }
+    
+  }
+  
+  #l<-subset(l,!is.na(l$weight))
+  l <- do.call(rbind, nets)
+  l$network <- factor(l$network, levels=genelist)
+  l$label[which(l$type == 'Target')] <- ""
+  ##choose a threshold for each network independently.
+  q <- quantile(l$color, 0.25,na.rm=T)
+  xxx <- l[which(l$type == 'Regulator'),]
+  xxx <- as.vector(xxx[which(xxx$color < q), 'label'])
+  xxx <- xxx[!(xxx %in% genelist)]
+  l$label[l$label %in% xxx] <- ""
+  colnames(l)[c(1,2)] <- c('from', 'to')
+  return(l)
+}
