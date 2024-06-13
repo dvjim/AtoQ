@@ -13,10 +13,10 @@ Quiescent adult neural stem cells (NSCs) in the mammalian brain arise from proli
 * Raw sequencing data can be found at GEO under the accession GSE232833.
 ## Highlights
 ***
-  * NSC development into an adult state is a multi-step process
-  * NSC occupancy in the G2/M cell cycle phase increases before quiescence acquisition
+  * NSC development into an adult state is a multi-step process with defined milestones
   * Molecular cascade underlying NSC quiescence acquisition and subsequent maturation
-  * Metabolic changes in autophagy &amp; ROS occur during early and late NSC development
+  * Sequential metabolic changes in autophagy and ROS during NSC development
+  * Autophagy promotes NSC quiescence during early postnatal development
   
 ## Methods
 ***
